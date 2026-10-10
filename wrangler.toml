@@ -1,0 +1,41 @@
+name = "kizuna-preview"
+main = "src/server/index.ts"
+compatibility_date = "2026-10-10"
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*"]
+[vars]
+APP_ENV = "preview"
+ADMIN_USERNAME = "admin"
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "MatchRoom"
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["MatchRoom"]
+[[d1_databases]]
+binding = "DB"
+database_name = "kizuna-preview"
+database_id = "00000000-0000-0000-0000-000000000001"
+migrations_dir = "migrations"
+[[r2_buckets]]
+binding = "ASSET_BUCKET"
+bucket_name = "kizuna-preview-assets"
+[env.production]
+name = "kizuna-production"
+[env.production.vars]
+APP_ENV = "production"
+ADMIN_USERNAME = "admin"
+[[env.production.durable_objects.bindings]]
+name = "ROOMS"
+class_name = "MatchRoom"
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "kizuna-production"
+database_id = "00000000-0000-0000-0000-000000000002"
+migrations_dir = "migrations"
+[[env.production.r2_buckets]]
+binding = "ASSET_BUCKET"
+bucket_name = "kizuna-production-assets"

@@ -1,0 +1,66 @@
+{
+  "file": "fighter-core.png",
+  "frameWidth": 448,
+  "frameHeight": 304,
+  "columns": 6,
+  "rows": 9,
+  "imageWidth": 2688,
+  "imageHeight": 2736,
+  "margin": 0,
+  "spacing": 0,
+  "origin": {
+    "x": 0.5,
+    "y": 1
+  },
+  "facing": "right",
+  "frameCount": 54,
+  "mappedFrameCount": 54,
+  "unusedFrames": [],
+  "animations": {
+    "idle": {
+      "start": 0,
+      "end": 5,
+      "fps": 8
+    },
+    "walk": {
+      "start": 6,
+      "end": 11,
+      "fps": 12
+    },
+    "jump": {
+      "start": 12,
+      "end": 17,
+      "fps": 10
+    },
+    "light_attack": {
+      "start": 18,
+      "end": 23,
+      "fps": 15
+    },
+    "heavy_attack": {
+      "start": 24,
+      "end": 29,
+      "fps": 12
+    },
+    "block": {
+      "start": 30,
+      "end": 35,
+      "fps": 8
+    },
+    "hit": {
+      "start": 36,
+      "end": 41,
+      "fps": 12
+    },
+    "ko": {
+      "start": 42,
+      "end": 47,
+      "fps": 6
+    },
+    "victory": {
+      "start": 48,
+      "end": 53,
+      "fps": 8
+    }
+  }
+}

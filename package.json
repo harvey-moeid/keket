@@ -1,0 +1,33 @@
+{
+  "name": "kizuna-live-arena",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:api": "XDG_CONFIG_HOME=$PWD/.wrangler/config WRANGLER_LOG_PATH=/tmp/kizuna-wrangler-logs wrangler dev --port 8787",
+    "build": "tsc --noEmit && tsc -p tsconfig.worker.json --noEmit && vite build",
+    "test": "tsx --test src/shared/*.test.ts src/server/*.test.ts",
+    "db:local": "XDG_CONFIG_HOME=$PWD/.wrangler/config WRANGLER_LOG_PATH=/tmp/kizuna-wrangler-logs wrangler d1 migrations apply kizuna-preview --local",
+    "deploy:preview": "npm run build && XDG_CONFIG_HOME=$PWD/.wrangler/config WRANGLER_LOG_PATH=/tmp/kizuna-wrangler-logs wrangler deploy",
+    "deploy:production": "npm run build && XDG_CONFIG_HOME=$PWD/.wrangler/config WRANGLER_LOG_PATH=/tmp/kizuna-wrangler-logs wrangler deploy --env production",
+    "admin:setup": "node scripts/admin-setup.mjs",
+    "dev:ui": "vite --host 0.0.0.0",
+    "format": "prettier --write src scripts vite.config.ts tsconfig.json tsconfig.worker.json package.json index.html .github/workflows"
+  },
+  "dependencies": {
+    "@fontsource/dm-sans": "^5.2.8",
+    "@fontsource/space-grotesk": "^5.2.10",
+    "lucide": "0.468.0",
+    "phaser": "3.90.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261010.1",
+    "@types/node": "24.7.0",
+    "prettier": "3.6.2",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3",
+    "vite": "7.3.7",
+    "wrangler": "4.149.0"
+  }
+}

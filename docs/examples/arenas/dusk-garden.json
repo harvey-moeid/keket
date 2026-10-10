@@ -1,0 +1,15 @@
+{
+  "name": "Dusk Garden",
+  "subtitle": "Original sample · flattened background",
+  "theme": "shrine",
+  "color": "#c591a4",
+  "backgroundFile": "dusk-garden-background.png",
+  "width": 1000,
+  "height": 420,
+  "gameCanvas": {
+    "width": 1000,
+    "height": 500
+  },
+  "floor": 420,
+  "hazard": false
+}

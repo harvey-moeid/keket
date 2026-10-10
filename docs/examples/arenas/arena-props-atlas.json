@@ -1,0 +1,108 @@
+{
+  "file": "arena-props-atlas.png",
+  "purpose": "Reference only; current arena editor does not import tilemaps/atlases",
+  "width": 512,
+  "height": 512,
+  "frameWidth": 128,
+  "frameHeight": 128,
+  "columns": 4,
+  "rows": 4,
+  "tiles": [
+    {
+      "index": 0,
+      "x": 0,
+      "y": 0,
+      "type": "stone"
+    },
+    {
+      "index": 1,
+      "x": 128,
+      "y": 0,
+      "type": "stone"
+    },
+    {
+      "index": 2,
+      "x": 256,
+      "y": 0,
+      "type": "stone"
+    },
+    {
+      "index": 3,
+      "x": 384,
+      "y": 0,
+      "type": "stone"
+    },
+    {
+      "index": 4,
+      "x": 0,
+      "y": 128,
+      "type": "lantern"
+    },
+    {
+      "index": 5,
+      "x": 128,
+      "y": 128,
+      "type": "lantern"
+    },
+    {
+      "index": 6,
+      "x": 256,
+      "y": 128,
+      "type": "lantern"
+    },
+    {
+      "index": 7,
+      "x": 384,
+      "y": 128,
+      "type": "lantern"
+    },
+    {
+      "index": 8,
+      "x": 0,
+      "y": 256,
+      "type": "sakura"
+    },
+    {
+      "index": 9,
+      "x": 128,
+      "y": 256,
+      "type": "sakura"
+    },
+    {
+      "index": 10,
+      "x": 256,
+      "y": 256,
+      "type": "sakura"
+    },
+    {
+      "index": 11,
+      "x": 384,
+      "y": 256,
+      "type": "sakura"
+    },
+    {
+      "index": 12,
+      "x": 0,
+      "y": 384,
+      "type": "rock"
+    },
+    {
+      "index": 13,
+      "x": 128,
+      "y": 384,
+      "type": "rock"
+    },
+    {
+      "index": 14,
+      "x": 256,
+      "y": 384,
+      "type": "rock"
+    },
+    {
+      "index": 15,
+      "x": 384,
+      "y": 384,
+      "type": "hazard-marker"
+    }
+  ]
+}
