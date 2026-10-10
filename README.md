@@ -69,4 +69,6 @@ npm test
 npm run build
 ```
 
+GitHub Actions menjalankan CI pada push/PR. CD mendukung Preview otomatis pada push `main` setelah diaktifkan, serta Production melalui release atau pemicu manual. Ikuti [setup secrets dan environment CI/CD](docs/DEPLOYMENT.md#github-actions-cicd).
+
 Lihat [hasil QA dan checklist operator](docs/QA.md), [deployment](docs/DEPLOYMENT.md), serta [batas implementasi](docs/IMPLEMENTATION.md). Deployment LIVE belum dijalankan. Database ID dalam `wrangler.toml` adalah placeholder untuk resource remote; dev lokal tetap berfungsi.

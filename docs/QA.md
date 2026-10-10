@@ -77,3 +77,7 @@ Katalog menjadi 32 action dan 14 profil serangan. Engine/API menambahkan 20 tes 
 ## Panduan aset custom
 
 [Custom asset guide](CUSTOM_ASSETS.md) menyertakan 8 PNG contoh/diagram, 2 mapping karakter JSON/CSV, dan 2 preset/atlas arena JSON. Sheet core: 54 frame, 2688 × 2736, 7.354.368 pixel; sheet semua aksi: 58 mapped + 2 empty, 2688 × 3040, 8.171.520 pixel. Kedua sheet memiliki frame 448 × 304, PNG alpha 0–255, batas atas/samping sel bersih, dan mapping yang lulus validator publish. Semua PNG memenuhi signature/container/byte/pixel budget; seluruh tautan lokal dokumen resolve. Exporter berjalan tanpa page error dan tanpa mutasi backend. Angka/grid hanya berada di guide, tidak di file upload. Background 1000 × 420; atlas 512 × 512 untuk referensi artist, bukan fitur tilemap runtime. Pemeriksaan ini memverifikasi file/model, bukan sesi upload admin LIVE nyata.
+
+## GitHub CI/CD
+
+Workflow diperiksa dengan actionlint 1.7.7 dan parser YAML. Script konfigurasi deployment diuji menggunakan credential fixture tanpa koneksi remote: perubahan ID hanya berlaku untuk environment tujuan, file asal tetap sama, credential tidak masuk file hasil, dan secret kosong/ID invalid/placeholder/target unknown ditolak sebelum file dibuat. CI lokal tetap lulus format, 39 tes dan build. Eksekusi GitHub Actions, environment protection serta deployment remote belum diverifikasi; instruksi aktivasi ada di [DEPLOYMENT.md](DEPLOYMENT.md#github-actions-cicd).
