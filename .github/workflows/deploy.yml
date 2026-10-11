@@ -19,7 +19,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   validate:
-    if: (github.event_name != 'push' || vars.ENABLE_PREVIEW_DEPLOY == 'true') && (github.event_name != 'release' || !github.event.release.prerelease)
+    if: github.event_name != 'release' || !github.event.release.prerelease
     uses: ./.github/workflows/ci.yml
   deploy:
     needs: validate
