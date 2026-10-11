@@ -19,6 +19,7 @@ import {
 import {
   constantEqual,
   verifyPassword,
+  passwordHash,
   imageSize,
   validImageContainer,
   readLimited,
@@ -30,6 +31,7 @@ export interface Env {
   ASSETS: Fetcher;
   ADMIN_USERNAME: string;
   ADMIN_PASSWORD_HASH: string;
+  ADMIN_REQUIRE_PASSWORD_CHANGE?: string;
   WEBHOOK_SECRET: string;
   WEBHOOK_SIGNING_SECRET?: string;
   TIKTOK_ROOM_ID?: string;
@@ -43,6 +45,12 @@ const json = (value: unknown, status = 200) =>
       "X-Content-Type-Options": "nosniff",
     },
   });
+interface AdminCredentials {
+  username: string;
+  passwordHash: string;
+  mustChange: boolean;
+  version: string;
+}
 async function body(req: Request) {
   return JSON.parse(new TextDecoder().decode(await readLimited(req, 65536)));
 }
@@ -368,14 +376,26 @@ export default {
       p = u.pathname;
     try {
       if (!p.startsWith("/api/")) return env.ASSETS.fetch(req);
+      const needsCredentials =
+        !!req.headers.get("Cookie")?.includes("kizuna_session=") ||
+        ["/api/auth", "/api/login", "/api/account"].includes(p);
+      const storedCredentials = needsCredentials
+        ? await readDoc<AdminCredentials | null>(env, "admin_credentials", null)
+        : null;
+      const credentials = storedCredentials || {
+        username: env.ADMIN_USERNAME,
+        passwordHash: env.ADMIN_PASSWORD_HASH,
+        mustChange: env.ADMIN_REQUIRE_PASSWORD_CHANGE === "true",
+        version: "bootstrap",
+      };
       const cookie = req.headers
         .get("Cookie")
         ?.match(/(?:^|;\s*)kizuna_session=([a-f0-9-]+)/)?.[1];
       const session = cookie
         ? await env.DB.prepare(
-            "SELECT id,csrf,expires FROM sessions WHERE id=? AND expires>?",
+            "SELECT id,csrf,expires FROM sessions WHERE id=? AND expires>? AND credential_version=?",
           )
-            .bind(cookie, Date.now())
+            .bind(cookie, Date.now(), credentials.version)
             .first<{ id: string; csrf: string; expires: number }>()
         : null;
       const sameOrigin =
@@ -385,11 +405,12 @@ export default {
           authenticated: !!session,
           csrf: session?.csrf,
           environment: env.APP_ENV,
-          configured: !!env.ADMIN_PASSWORD_HASH,
+          configured: !!credentials.passwordHash,
+          mustChangePassword: !!session && credentials.mustChange,
         });
       if (p === "/api/login" && req.method === "POST") {
         if (!sameOrigin) return json({ error: "Origin ditolak." }, 403);
-        if (!env.ADMIN_PASSWORD_HASH)
+        if (!credentials.passwordHash)
           return json(
             { error: "ADMIN_PASSWORD_HASH belum dikonfigurasi." },
             503,
@@ -412,10 +433,10 @@ export default {
           .bind(ip, Date.now() + 900000, Date.now(), Date.now())
           .run();
         if (
-          d.username !== env.ADMIN_USERNAME ||
+          d.username !== credentials.username ||
           typeof d.password !== "string" ||
           d.password.length > 256 ||
-          !(await verifyPassword(d.password, env.ADMIN_PASSWORD_HASH))
+          !(await verifyPassword(d.password, credentials.passwordHash))
         )
           return json({ error: "Username atau password salah." }, 401);
         const id = crypto.randomUUID(),
@@ -423,14 +444,16 @@ export default {
         await env.DB.prepare("DELETE FROM sessions WHERE expires<?")
           .bind(Date.now())
           .run();
-        await env.DB.prepare("INSERT INTO sessions VALUES (?,?,?)")
-          .bind(id, csrf, Date.now() + 86400000)
+        await env.DB.prepare(
+          "INSERT INTO sessions (id,csrf,expires,credential_version) VALUES (?,?,?,?)",
+        )
+          .bind(id, csrf, Date.now() + 86400000, credentials.version)
           .run();
         await env.DB.prepare("DELETE FROM login_limits WHERE ip=?")
           .bind(ip)
           .run();
         return Response.json(
-          { csrf },
+          { csrf, mustChangePassword: credentials.mustChange },
           {
             headers: {
               "Set-Cookie": `kizuna_session=${id}; HttpOnly; SameSite=Strict; Path=/; Max-Age=86400${u.protocol === "https:" ? "; Secure" : ""}`,
@@ -551,6 +574,92 @@ export default {
           },
         );
       }
+      if (p === "/api/account" && req.method === "GET")
+        return json({
+          username: credentials.username,
+          mustChangePassword: credentials.mustChange,
+        });
+      if (p === "/api/account" && req.method === "POST") {
+        const d = await body(req);
+        if (
+          typeof d.username !== "string" ||
+          !/^[A-Za-z0-9_.-]{3,32}$/.test(d.username) ||
+          typeof d.newPassword !== "string" ||
+          d.newPassword.length < 12 ||
+          d.newPassword.length > 256 ||
+          d.newPassword === d.currentPassword
+        )
+          return json(
+            {
+              error:
+                "Username 3–32 karakter; password baru 12–256 karakter dan harus berbeda.",
+            },
+            400,
+          );
+        const ip = req.headers.get("CF-Connecting-IP") || "local";
+        const limit = await env.DB.prepare(
+          "SELECT attempts,resets FROM login_limits WHERE ip=?",
+        )
+          .bind(ip)
+          .first<{ attempts: number; resets: number }>();
+        if (limit && limit.resets > Date.now() && limit.attempts >= 5)
+          return json(
+            { error: "Terlalu banyak percobaan. Coba dalam 15 menit." },
+            429,
+          );
+        await env.DB.prepare(
+          "INSERT INTO login_limits (ip,attempts,resets) VALUES (?,1,?) ON CONFLICT(ip) DO UPDATE SET attempts=CASE WHEN resets<? THEN 1 ELSE attempts+1 END,resets=CASE WHEN resets<? THEN excluded.resets ELSE resets END",
+        )
+          .bind(ip, Date.now() + 900000, Date.now(), Date.now())
+          .run();
+        if (
+          typeof d.currentPassword !== "string" ||
+          d.currentPassword.length > 256 ||
+          !(await verifyPassword(d.currentPassword, credentials.passwordHash))
+        )
+          return json({ error: "Password saat ini salah." }, 400);
+        const next: AdminCredentials = {
+          username: d.username,
+          passwordHash: await passwordHash(d.newPassword),
+          mustChange: false,
+          version: crypto.randomUUID(),
+        };
+        const results = await env.DB.batch([
+          env.DB.prepare(
+            "INSERT INTO documents (key,value,updated_at) VALUES ('admin_credentials',?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at WHERE documents.value=?",
+          ).bind(
+            JSON.stringify(next),
+            new Date().toISOString(),
+            storedCredentials ? JSON.stringify(storedCredentials) : "",
+          ),
+          env.DB.prepare(
+            "DELETE FROM sessions WHERE credential_version!=? AND EXISTS (SELECT 1 FROM documents WHERE key='admin_credentials' AND json_extract(value,'$.version')=?)",
+          ).bind(next.version, next.version),
+        ]);
+        if (!results[0].meta.changes)
+          return json({ error: "Akun telah berubah. Login kembali." }, 409);
+        await env.DB.prepare("DELETE FROM login_limits WHERE ip=?")
+          .bind(ip)
+          .run();
+        return Response.json(
+          { ok: true, reauthenticate: true },
+          {
+            headers: {
+              "Cache-Control": "no-store",
+              "Set-Cookie":
+                "kizuna_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0",
+            },
+          },
+        );
+      }
+      if (credentials.mustChange)
+        return json(
+          {
+            error:
+              "Ganti password awal melalui pengaturan akun sebelum melanjutkan.",
+          },
+          409,
+        );
       if (p === "/api/catalog" && req.method === "GET")
         return json({
           fighters: await readDoc(env, "fighters", fighters),
@@ -605,6 +714,18 @@ export default {
         const f = (await body(req)) as Fighter;
         const errors = validateFighter(f);
         if (errors.length) return json({ error: errors.join(" ") }, 400);
+        if (f.appearance?.faceAsset) {
+          const face = await env.ASSET_BUCKET.get(
+            f.appearance.faceAsset.split("/").pop()!,
+          );
+          if (!face) throw Error("Aset wajah tidak ditemukan.");
+          const size = imageSize(
+            new Uint8Array(await face.arrayBuffer()),
+            face.httpMetadata?.contentType || "",
+          );
+          if (!size || size.width > 1024 || size.height > 1024)
+            throw Error("Wajah maksimal 1024 × 1024 px.");
+        }
         if (f.asset) {
           if (!/^\/api\/assets\/[a-f0-9-]+\.(png|webp)$/.test(f.asset))
             throw Error("Path aset tidak valid.");

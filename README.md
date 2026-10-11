@@ -14,7 +14,9 @@ npm run admin:setup
 npm run dev
 ```
 
-`admin:setup` meminta username dan password dengan input password tersembunyi. Password harus minimal 12 karakter; hanya PBKDF2 salted hash disimpan. `.dev.vars` diabaikan Git dan tidak boleh dikomit. Secret webhook lokal dibuat bila belum ada, tanpa dicetak. Jalankan ulang perintah ini untuk mengganti password pengembangan dan restart Worker.
+`admin:setup` meminta username dan password dengan input password tersembunyi. Password harus minimal 12 karakter; hanya PBKDF2 salted hash disimpan. `.dev.vars` diabaikan Git dan tidak boleh dikomit. Secret webhook lokal dibuat bila belum ada, tanpa dicetak. Akun bootstrap baru dibaca setelah Worker direstart, selama akun belum diganti lewat UI.
+
+Untuk akun awal sementara, gunakan `npm run admin:bootstrap`: password awal minimal 8 karakter dan wajib diganti setelah login pertama. Di UI **Settings → Akun admin**, password baru minimal 12 karakter. Perubahan disimpan sebagai hash di D1 dan mengeluarkan semua sesi lama. Setelah akun diganti lewat UI, data D1 menjadi sumber kredensial utama; mengubah `.dev.vars` saja tidak mengganti akun aktif. Lihat [panduan pemulihan akun](docs/DEPLOYMENT.md#akun-admin-dan-pemulihan).
 
 `dev` menyiapkan build awal bila belum ada, menjalankan migrasi D1 lokal secara idempoten, lalu menjalankan Vite port 5173 dan Worker port 8787. Untuk dua terminal terpisah: `npm run db:local`, `npm run build`, `npm run dev:api`, dan `npm run dev:ui`. Database/aset lokal berada di `.wrangler/state` dan tidak dicampur dengan resource remote.
 
@@ -34,6 +36,8 @@ Keyboard Merah: A/D/W, J light, K heavy, L block, I special, U ultimate, O dodge
 Simulasi server 30 tick/s; rendering Phaser menargetkan 60 FPS. Light/heavy memakai stamina. Special memerlukan 25 energi dan ultimate 100 pada preset default. Startup, active, recovery, range/hitbox, cooldown, hurtbox, combo window/multiplier, serta statistik dapat diedit dalam batas validasi. Fighter/version disnapshot saat konfigurasi match sehingga edit tidak mengubah pertandingan aktif.
 
 Panduan gambar, spritesheet siap upload, mapping frame, dan contoh background/atlas arena tersedia di [CUSTOM_ASSETS.md](docs/CUSTOM_ASSETS.md).
+
+Untuk mengganti wajah saja, upload wajah custom tanpa sheet seluruh tubuh, atau mengganti pakaian saja pada rig bawaan, ikuti [panduan bagian karakter](docs/CHARACTER_PARTS.md).
 
 Upload PNG/WebP maksimal 8 MiB dan dimensi 8–8192 px, maksimal 8.388.608 pixel. Tentukan ukuran frame dan index animasi `idle`, `walk`, `jump`, `light_attack`, `heavy_attack`, `block`, `hit`, `ko`, `victory`. Sprite dianggap menghadap kanan dan dirender setinggi 270 px pada arena 1000 × 500; karakter bawaan memakai ukuran visual yang sama. Index mulai 0, baris-kolom dari kiri atas. Pose idle, walk, light attack harus berbeda. Simpan draft yang belum lengkap; publish/preview mensyaratkan seluruh mapping valid dan index berada dalam spritesheet. Preview memakai sandbox. Gambar tunggal tidak menghasilkan pose secara otomatis. Aset contoh QA bukan konten roster production.
 
@@ -69,6 +73,6 @@ npm test
 npm run build
 ```
 
-GitHub Actions menjalankan CI pada push/PR. CD mendukung Preview otomatis pada push `main` setelah diaktifkan, serta Production melalui release atau pemicu manual. Ikuti [setup secrets dan environment CI/CD](docs/DEPLOYMENT.md#github-actions-cicd).
+GitHub Actions menjalankan CI pada push/PR. Konfigurasi CD terbaru menargetkan Production pada push `main` atau pemicu manual. Ikuti [setup secrets dan environment CI/CD](docs/DEPLOYMENT.md#github-actions-cicd).
 
-Lihat [hasil QA dan checklist operator](docs/QA.md), [deployment](docs/DEPLOYMENT.md), serta [batas implementasi](docs/IMPLEMENTATION.md). Deployment LIVE belum dijalankan. Database ID dalam `wrangler.toml` adalah placeholder untuk resource remote; dev lokal tetap berfungsi.
+Lihat [hasil QA dan checklist operator](docs/QA.md), [deployment](docs/DEPLOYMENT.md), serta [batas implementasi](docs/IMPLEMENTATION.md). Deployment LIVE belum dijalankan. Binding Production sudah tercantum di `wrangler.toml`; storage lokal tetap terpisah. Hash akun lokal perlu dikonfigurasi sebagai secret Worker agar kredensial awal yang sama berlaku di Cloudflare.

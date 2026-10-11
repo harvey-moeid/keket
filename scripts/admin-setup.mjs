@@ -2,10 +2,18 @@ import { createInterface } from "node:readline/promises";
 import { readFile, writeFile, chmod } from "node:fs/promises";
 import { webcrypto } from "node:crypto";
 const rl = createInterface({ input: process.stdin, output: process.stdout });
+const initial = process.argv.includes("--initial");
+const minimum = initial ? 8 : 12;
 console.log(
   "Konfigurasi akun pengembangan lokal. Password tidak disimpan plaintext.",
 );
 const username = (await rl.question("Username [admin]: ")) || "admin";
+if (!/^[A-Za-z0-9_.-]{3,32}$/.test(username)) {
+  rl.close();
+  throw Error(
+    "Username 3–32 karakter: huruf, angka, titik, underscore atau minus.",
+  );
+}
 if (!process.stdin.isTTY) {
   rl.close();
   throw Error(
@@ -14,7 +22,7 @@ if (!process.stdin.isTTY) {
 }
 rl.close();
 process.stdout.write(
-  "Password baru (minimal 12 karakter, input tersembunyi): ",
+  `Password ${initial ? "awal" : "baru"} (minimal ${minimum} karakter, input tersembunyi): `,
 );
 const password = await new Promise((resolve) => {
   let value = "";
@@ -39,7 +47,8 @@ const password = await new Promise((resolve) => {
   };
   process.stdin.on("data", listener);
 });
-if (password.length < 12) throw Error("Password minimal 12 karakter.");
+if (password.length < minimum || password.length > 256)
+  throw Error(`Password ${minimum}–256 karakter.`);
 const salt = webcrypto.getRandomValues(new Uint8Array(16));
 const key = await webcrypto.subtle.importKey(
   "raw",
@@ -61,7 +70,9 @@ try {
 const retained = old
   .split("\n")
   .filter(
-    (line) => !/^ADMIN_(USERNAME|PASSWORD_HASH)=/.test(line) && line.trim(),
+    (line) =>
+      !/^ADMIN_(USERNAME|PASSWORD_HASH|REQUIRE_PASSWORD_CHANGE)=/.test(line) &&
+      line.trim(),
   )
   .join("\n");
 const secret = retained.includes("WEBHOOK_SECRET=")
@@ -71,10 +82,10 @@ const secret = retained.includes("WEBHOOK_SECRET=")
     "\n";
 await writeFile(
   ".dev.vars",
-  `ADMIN_USERNAME=${JSON.stringify(username)}\nADMIN_PASSWORD_HASH=${JSON.stringify("310000:" + hex(salt) + ":" + hex(hash))}\n${secret}${retained}\n`,
+  `ADMIN_USERNAME=${JSON.stringify(username)}\nADMIN_PASSWORD_HASH=${JSON.stringify("310000:" + hex(salt) + ":" + hex(hash))}\nADMIN_REQUIRE_PASSWORD_CHANGE=${JSON.stringify(initial ? "true" : "false")}\n${secret}${retained}\n`,
   { mode: 0o600 },
 );
 await chmod(".dev.vars", 0o600);
 console.log(
-  "Akun tersimpan di .dev.vars (ignored). Restart npm run dev:api. Secret webhook lokal dibuat bila belum ada.",
+  "Akun bootstrap tersimpan di .dev.vars (ignored). Restart npm run dev:api. Akun yang sudah diganti melalui UI memakai data D1; lihat panduan pemulihan akun. Secret webhook lokal dibuat bila belum ada.",
 );

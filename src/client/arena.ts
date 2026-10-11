@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 import { drawAbilityEffects } from "./ability-effects";
 import { skillActions } from "../shared/abilities";
-import { drawFighter, FIGHTER_HEIGHT } from "./fighter-renderer";
+import { drawFighter, rigPose, FIGHTER_HEIGHT } from "./fighter-renderer";
 import type { Actor, MatchState, Team } from "../shared/model";
 let current: MatchState | undefined, game: Phaser.Game | undefined;
 export function updateArena(state: MatchState) {
@@ -34,6 +34,10 @@ class BattleScene extends Phaser.Scene {
   hitTick = -1;
   backImage?: Phaser.GameObjects.Image;
   custom = new Map<Team, Phaser.GameObjects.Sprite>();
+  faces = new Map<
+    Team,
+    { container: Phaser.GameObjects.Container; image: Phaser.GameObjects.Image }
+  >();
   loading = new Set<string>();
   petals = Array.from({ length: 30 }, (_, i) => ({
     x: (i * 149) % 1000,
@@ -255,7 +259,14 @@ class BattleScene extends Phaser.Scene {
       g.fillStyle(color, 0.12);
       g.fillEllipse(x - direction * 30, y - 125, 92, 240);
     }
-    if (!uploaded) drawFighter(g, a, direction, time);
+    const faceLoaded = this.modularFace(
+      a,
+      team,
+      direction,
+      time,
+      !!a.fighter.asset,
+    );
+    if (!uploaded) drawFighter(g, a, direction, time, faceLoaded);
     drawAbilityEffects(
       g,
       {
@@ -291,6 +302,53 @@ class BattleScene extends Phaser.Scene {
         y - 172,
       );
     }
+  }
+  modularFace(
+    a: Actor,
+    team: Team,
+    direction: number,
+    time: number,
+    fullSheet: boolean,
+  ) {
+    const existing = this.faces.get(team);
+    existing?.container.setVisible(false);
+    const asset = a.fighter.appearance?.faceAsset;
+    if (!asset || fullSheet) return false;
+    const key = `face-${asset}`;
+    if (!this.textures.exists(key)) {
+      if (!this.loading.has(key)) {
+        this.loading.add(key);
+        this.load.image(key, asset);
+        this.load.once(`loaderror`, (file: Phaser.Loader.File) => {
+          if (file.key === key) this.loading.delete(key);
+        });
+        this.load.start();
+      }
+      return false;
+    }
+    let face = existing;
+    if (!face) {
+      const image = this.add.image(0, 0, key);
+      const container = this.add.container(0, 0, [image]).setDepth(3.1);
+      face = { container, image };
+      this.faces.set(team, face);
+    }
+    const pose = rigPose(a, time);
+    const cos = Math.cos(pose.rotation),
+      sin = Math.sin(pose.rotation);
+    face.container
+      .setVisible(true)
+      .setPosition(a.x, pose.y)
+      .setScale(direction * 1.08, 1.08 * pose.scaleY);
+    face.image
+      .setTexture(key)
+      .setDisplaySize(28, 34)
+      .setRotation(pose.rotation)
+      .setPosition(
+        pose.offsetX + 6 * cos + 205 * sin,
+        pose.offsetY + 6 * sin - 205 * cos,
+      );
+    return true;
   }
   update(time: number) {
     if (!current) return;

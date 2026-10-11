@@ -1,34 +1,32 @@
 # Deployment dan operasi
 
-## Resource yang perlu disediakan operator
+Konfigurasi terbaru repo memakai **satu Worker Production**, `kizuna-production`, dengan D1 Production yang sudah diikat dalam `wrangler.toml` dan R2 `kizuna-production-assets`. Environment Preview terpisah sudah dihapus pada perubahan upstream. Mode lokal tetap memakai storage lokal Wrangler; sandbox game merupakan room terpisah dan tidak menulis riwayat utama.
 
-Akun Cloudflare dengan Workers Paid yang mendukung SQLite Durable Objects, dua D1 database dan dua R2 bucket. Kredensial Cloudflare belum diberikan dan resource remote belum dibuat pada pengerjaan ini. CI berjalan pada push/PR; CD Preview otomatis dapat diaktifkan setelah resource dan secrets siap.
+## Resource dan secrets
 
-1. Autentikasi Wrangler dengan akses akun yang sesuai.
-2. Buat database `kizuna-preview` dan `kizuna-production`; ganti kedua placeholder `database_id` di `wrangler.toml` dengan ID sebenarnya.
-3. Buat bucket `kizuna-preview-assets` dan `kizuna-production-assets`.
-4. Atur secret `ADMIN_PASSWORD_HASH` dan `WEBHOOK_SECRET` untuk **masing-masing** environment menggunakan secret Worker. Username berada di vars. Hash format `310000:<salt hex 16 bytes>:<hash hex 32 bytes>`; `npm run admin:setup` menghasilkan hash lokal. Jangan gunakan secret pengujian untuk production atau menyalin nilai ke log/chat/Git. Jangan memakai password sebagai token webhook.
-5. Terapkan migrasi dengan `wrangler d1 migrations apply kizuna-preview --remote` dan `wrangler d1 migrations apply kizuna-production --remote --env production`.
-6. `npm run deploy:preview`. Verifikasi login HTTPS, cookie Secure, kontrol, overlay dan adapter konektor di Preview; kemudian `npm run deploy:production` setelah QA operator.
+1. Pastikan akun Cloudflare mendukung SQLite Durable Objects, binding D1 yang tercantum dan bucket R2 Production.
+2. Atur secrets Worker `ADMIN_PASSWORD_HASH` dan `WEBHOOK_SECRET`; untuk konektor native atur `WEBHOOK_SIGNING_SECRET` yang sama pada konektor dan Worker. Nilai secret tidak disimpan di Git atau HTML. Hash admin berformat `310000:<salt hex 16 bytes>:<hash hex 32 bytes>`.
+3. `npm run admin:bootstrap` membuat hash akun awal di `.dev.vars` privat untuk lokal. Konfigurasi Production juga memakai `ADMIN_REQUIRE_PASSWORD_CHANGE="true"`; operator perlu memasukkan hash bootstrap yang sesuai ke secret Worker Production. Kredensial lokal tidak otomatis diunggah ke Cloudflare.
+4. Jalankan migrasi `wrangler d1 migrations apply kizuna-production --remote` sebelum menjalankan Worker baru, atau gunakan workflow CD yang menjalankannya sebelum deploy. Dev lokal memakai `npm run db:local` / `npm run dev`.
+5. Deployment manual memakai `npm run deploy:production`. Ikuti checklist operator [QA.md](QA.md) sebelum menggunakan LIVE nyata.
 
-Resource binding environment tidak diwariskan antar-environment; konfigurasi menyebut DO, D1, R2 secara terpisah. Environment name memberi room utama masing-masing identitas. Room sandbox terpisah dan tidak menulis tabel history. Secrets harus berbeda di Preview/Production. Review retensi, pemberitahuan privasi dan lisensi aset sebelum LIVE.
+## Akun admin dan pemulihan
 
-Setelah rotasi password admin, revokasi sesi melalui penghapusan rows `sessions` pada D1 environment yang sesuai; sesi lama tidak otomatis terkait versi password.
+Pada environment baru, `ADMIN_USERNAME` dan `ADMIN_PASSWORD_HASH` menjadi kredensial bootstrap. Untuk password awal sementara, atur var Worker `ADMIN_REQUIRE_PASSWORD_CHANGE="true"` di environment tujuan (lokal dibuat oleh `npm run admin:bootstrap`). Hash tetap di secret Worker; tidak ada password default yang disimpan di source. Login pertama membuka form akun sebelum kontrol admin dapat digunakan. Password baru wajib berbeda dan minimal 12 karakter, dengan verifikasi password saat ini serta CSRF dan pembatasan percobaan.
+
+**Settings → Akun admin** mengganti username/password. Kredensial baru disimpan sebagai salted PBKDF2 hash pada dokumen privat D1 `admin_credentials`, mengalahkan konfigurasi bootstrap. Sesi dicabut otomatis; versi kredensial juga menolak sesi dari login lama yang selesai bersamaan dengan rotasi. Hash tidak dikirim ke UI/catalog/overlay. Jalankan migrasi `0002_account_credentials.sql` sebelum menjalankan versi ini; migrasi mengeluarkan sesi versi lama.
+
+Jika kehilangan password, operator dengan akses D1 dapat memulihkan lingkungan yang tepat: siapkan hash bootstrap baru sebagai secret Worker dan `ADMIN_REQUIRE_PASSWORD_CHANGE="true"`, lalu hapus dokumen `admin_credentials` serta semua rows `sessions` pada D1 lingkungan tersebut. Jangan menghapus data fighter/match. Login dengan akun bootstrap baru dan segera ganti melalui UI. Mengubah secret bootstrap saja tidak mengubah akun yang sudah tersimpan di D1. Pemulihan tidak tersedia lewat endpoint publik.
 
 ## GitHub Actions CI/CD
 
-Workflow **Validate** menjalankan `npm ci`, pemeriksaan format, 39 tes combat/security dan build TypeScript/Vite pada push dan pull request. Workflow yang sama dipanggil oleh **Deploy Cloudflare** sebelum deployment; kegagalan validasi menghentikan deploy. PR tidak mengakses secrets deployment.
+Workflow **Validate** menjalankan install, pemeriksaan format, 44 tes combat/security dan build TypeScript/Vite pada push/PR. **Deploy Cloudflare** menggunakan workflow validasi yang sama sebelum deployment Production pada push `main` atau `workflow_dispatch`. Konfigurasi upstream terbaru tidak memakai release/Preview sebagai pemicu deploy.
 
-1. Di **Settings → Environments**, buat `preview` dan `production`. Untuk production, atur required reviewers jika paket GitHub mendukungnya; workflow tidak membuat aturan approval otomatis. Batasi branch/tag deployment sesuai kebijakan repo. Commit deployment wajib berada dalam history `main`.
-2. Pada **masing-masing environment**, tambahkan secrets `CLOUDFLARE_API_TOKEN` dan `CLOUDFLARE_ACCOUNT_ID`. Token perlu akses Worker Scripts, D1 dan R2 pada akun yang sesuai. Gunakan token dengan scope sekecil mungkin dan nilai terpisah bila memungkinkan.
-3. Tambahkan environment variable `D1_DATABASE_ID` untuk database lingkungan itu. ID harus UUID sebenarnya. Script menulis `.wrangler-deploy.toml` sementara dan hanya mengganti database lingkungan tujuan; file asal tidak berubah. Jika ID sebenarnya sudah dikomit dalam `wrangler.toml`, variable ini opsional. Placeholder selalu ditolak untuk tujuan deployment.
-4. Sediakan bucket/D1 dan secret Worker pada langkah resource di atas. Secrets aplikasi (`ADMIN_PASSWORD_HASH`, `WEBHOOK_SECRET`, `WEBHOOK_SIGNING_SECRET`) tetap di Cloudflare, tidak dibundel oleh GitHub. Workflow tidak membuat resource atau mengatur password aplikasi.
-5. Untuk Preview otomatis, tambahkan **repository variable** `ENABLE_PREVIEW_DEPLOY=true` di **Settings → Secrets and variables → Actions → Variables**. Push berikutnya ke `main` menjalankan validasi, migrasi D1 Preview dan deploy Worker Preview. Tanpa variable ini, CD push dilewati dan CI tetap berjalan.
-6. Untuk Production, publikasikan GitHub Release stabil dengan tag pada commit yang sudah masuk `main`. Release bertanda prerelease dilewati; gunakan Preview manual untuk pengujian. Alternatif: **Actions → Deploy Cloudflare → Run workflow**, pilih ref `main` atau tag yang sudah masuk `main`, lalu target `preview` / `production`. Approval berlaku jika environment protection sudah dikonfigurasi.
+Di GitHub **Settings → Environments → production**, siapkan secrets `CLOUDFLARE_API_TOKEN` dan `CLOUDFLARE_ACCOUNT_ID`. Token perlu scope Worker Scripts, D1 dan R2 pada akun terkait. Atur required reviewers/branch protection bila dibutuhkan dan didukung paket GitHub; kode workflow tidak membuat aturan tersebut otomatis. Secrets aplikasi tetap disimpan di Cloudflare, bukan bundel frontend.
 
-Deployment satu environment diantrikan dan tidak dibatalkan di tengah migrasi. Build selesai sebelum migrasi remote; jika migrasi gagal, Worker tidak dideploy. Jika deploy gagal setelah migrasi berhasil, perubahan schema tetap ada: migrasi harus kompatibel dengan Worker sebelumnya dan tidak ada rollback database otomatis. Ringkasan job mencatat environment dan SHA commit setelah deploy berhasil. Mode manual tidak memerlukan `ENABLE_PREVIEW_DEPLOY`.
+Workflow memeriksa konfigurasi Production, membangun aplikasi, menjalankan migrasi D1, lalu deploy Worker. Kegagalan validasi/build/migrasi menghentikan deploy. Deployment satu environment diantrikan. Bila deploy gagal setelah migrasi berhasil, perubahan schema tetap ada; gunakan migrasi yang kompatibel dengan Worker sebelumnya. Tidak ada rollback database otomatis. Ringkasan job mencatat SHA commit yang berhasil dideploy.
 
-Saat konfigurasi baru ini ditambahkan, resource/secrets GitHub dan deployment Cloudflare belum diverifikasi. Pemeriksaan lokal tidak membuktikan eksekusi runner GitHub atau deployment remote.
+Konfigurasi resource berasal dari perubahan upstream; akses credential, hasil runner GitHub dan deployment remote belum diverifikasi dari sesi ini.
 
 ## Operasi dan pemulihan
 

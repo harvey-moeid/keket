@@ -8,9 +8,10 @@
     "dev:api": "XDG_CONFIG_HOME=$PWD/.wrangler/config WRANGLER_LOG_PATH=/tmp/kizuna-wrangler-logs wrangler dev --port 8787",
     "build": "tsc --noEmit && tsc -p tsconfig.worker.json --noEmit && vite build",
     "test": "tsx --test src/shared/*.test.ts src/server/*.test.ts",
-    "db:local": "wrangler d1 migrations apply kizuna-production --local",
+    "db:local": "XDG_CONFIG_HOME=$PWD/.wrangler/config WRANGLER_LOG_PATH=/tmp/kizuna-wrangler-logs wrangler d1 migrations apply kizuna-production --local",
     "deploy:production": "npm run build && wrangler deploy",
     "admin:setup": "node scripts/admin-setup.mjs",
+    "admin:bootstrap": "node scripts/admin-setup.mjs --initial",
     "dev:ui": "vite --host 0.0.0.0",
     "format": "prettier --write src scripts vite.config.ts tsconfig.json tsconfig.worker.json package.json index.html .github/workflows"
   },

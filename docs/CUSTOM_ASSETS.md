@@ -1,5 +1,7 @@
 # Panduan gambar karakter custom dan arena
 
+Untuk wajah/pakaian terpisah pada rig bawaan, lihat [CHARACTER_PARTS.md](CHARACTER_PARTS.md). Panduan di bawah membahas spritesheet seluruh tubuh dan background arena.
+
 Panduan ini mengikuti editor yang sudah tersedia di KIZUNA. Contoh PNG di bawah dibuat dari rig game dan ilustrasi procedural orisinal, sehingga ukuran frame dan mapping dapat diperiksa secara tepat. Ini aset latihan impor dan acuan untuk artist; animasi contoh masih sederhana, bukan spritesheet anime produksi dengan semua keyframe unik.
 
 ## 1. File yang dipakai

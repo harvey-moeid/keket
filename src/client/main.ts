@@ -166,6 +166,7 @@ let state: MatchState = new Engine().state,
   settings: Settings = { ...defaultSettings },
   mappings: Mapping[] = structuredClone(defaultMappings),
   authenticated = false,
+  mustChangePassword = false,
   csrf = "",
   connected = false,
   view = location.pathname,
@@ -221,6 +222,8 @@ async function api(path: string, data?: unknown, method?: string) {
   if (!res.ok) {
     if (res.status === 401 && path !== "/login") {
       authenticated = false;
+      mustChangePassword = false;
+      csrf = "";
       login();
     }
     throw Error(result.error || "Permintaan gagal.");
@@ -231,6 +234,10 @@ function hydrate() {
   createIcons({ icons });
 }
 function navigate(path: string) {
+  if (mustChangePassword) {
+    void accountEditor(true);
+    return;
+  }
   if (path.startsWith("/admin") && !authenticated) {
     login();
     return;
@@ -260,6 +267,54 @@ function closeModal() {
   modal?.remove();
   modal = undefined;
 }
+async function accountEditor(required = false) {
+  try {
+    const account = await api("/account");
+    modalOpen(
+      "Akun admin",
+      required
+        ? "Ganti password awal sebelum menggunakan control room."
+        : "Perubahan akan mengeluarkan semua sesi admin.",
+      `<form id="account-form" class="form-stack"><label>Username<input name="username" value="${esc(account.username)}" autocomplete="username" required minlength="3" maxlength="32" pattern="[A-Za-z0-9_.-]+"></label><label>Password saat ini<input name="currentPassword" type="password" autocomplete="current-password" required maxlength="256"></label><label>Password baru<input name="newPassword" type="password" autocomplete="new-password" required minlength="12" maxlength="256"></label><label>Ulangi password baru<input name="confirmPassword" type="password" autocomplete="new-password" required minlength="12" maxlength="256"></label><p class="hint">Password baru minimal 12 karakter. Password lama tidak dapat dipakai lagi setelah disimpan.</p><p class="form-error" role="alert"></p><button class="button primary" type="submit">Simpan akun dan login kembali</button></form>`,
+    );
+    document.querySelector<HTMLFormElement>("#account-form")!.onsubmit = async (
+      e,
+    ) => {
+      e.preventDefault();
+      const form = e.currentTarget as HTMLFormElement;
+      const d = Object.fromEntries(new FormData(form));
+      if (d.newPassword !== d.confirmPassword) {
+        form.querySelector(".form-error")!.textContent =
+          "Konfirmasi password tidak sama.";
+        return;
+      }
+      const button = form.querySelector<HTMLButtonElement>(
+        "button[type=submit]",
+      )!;
+      button.disabled = true;
+      try {
+        await api("/account", d);
+        authenticated = false;
+        mustChangePassword = false;
+        csrf = "";
+        closeModal();
+        view = "/game";
+        window.history.replaceState({}, "", view);
+        await render();
+        toast("Akun berhasil diganti. Masuk dengan password baru.");
+        login();
+      } catch (error) {
+        form.querySelector(".form-error")!.textContent = (
+          error as Error
+        ).message;
+      } finally {
+        button.disabled = false;
+      }
+    };
+  } catch (error) {
+    toast((error as Error).message, true);
+  }
+}
 function login() {
   modalOpen(
     "Masuk ke control room",
@@ -275,7 +330,12 @@ function login() {
       const d = await api("/login", Object.fromEntries(new FormData(f)));
       csrf = d.csrf;
       authenticated = true;
+      mustChangePassword = !!d.mustChangePassword;
       closeModal();
+      if (mustChangePassword) {
+        await accountEditor(true);
+        return;
+      }
       await catalog();
       navigate("/admin");
       toast("Selamat datang di control room.");
@@ -351,6 +411,8 @@ function shell(content: string) {
     try {
       await api("/logout", {});
       authenticated = false;
+      mustChangePassword = false;
+      csrf = "";
       csrf = "";
       navigate("/game");
     } catch (e) {
@@ -409,7 +471,7 @@ function dashboard() {
       .slice(0, 4)
       .map(
         (f) =>
-          `<button class="mini-fighter" data-fighter-info="${f.id}"><img src="${esc(f.asset || "/assets/" + (builtins.some((b) => b.id === f.id) ? f.id : "akari") + ".svg")}" alt="${esc(f.name)}"><span><strong>${esc(f.name)}</strong><small>${esc(f.element)}</small></span>${icon("arrow-up-right")}</button>`,
+          `<button class="mini-fighter" data-fighter-info="${f.id}"><img src="${esc(f.appearance?.faceAsset || f.asset || "/assets/" + (builtins.some((b) => b.id === f.id) ? f.id : "akari") + ".svg")}" alt="${esc(f.name)}"><span><strong>${esc(f.name)}</strong><small>${esc(f.element)}</small></span>${icon("arrow-up-right")}</button>`,
       )
       .join("")}</div></section>`
   );
@@ -532,6 +594,7 @@ function patch() {
       .querySelectorAll<HTMLImageElement>(`[data-${t}-avatar]`)
       .forEach((el) => {
         const src =
+          a.fighter.appearance?.faceAsset ||
           a.fighter.asset ||
           "/assets/" +
             (builtins.some((f) => f.id === a.fighter.id)
@@ -636,7 +699,7 @@ function fighterInfo(f: Fighter) {
   modalOpen(
     f.name,
     f.title,
-    `<div class="fighter-info"><img src="${esc(f.asset || "/assets/" + (builtins.some((b) => b.id === f.id) ? f.id : "akari") + ".svg")}" alt="${esc(f.name)}"><div><span class="pill" style="color:${f.color}">${esc(f.element)}</span><h3>${esc(f.special)}</h3><p>Special · 25 energi</p><h3>${esc(f.ultimate)}</h3><p>Ultimate · 100 energi</p><div class="stats-inline">HP ${f.hp} · ATK ${f.attack}<br>DEF ${f.defense} · SPD ${f.speed}</div><p class="hint">AI personality: ${esc(f.personality)}<br>Version ${f.version} · ${f.published ? "Published" : "Draft"}</p></div></div>`,
+    `<div class="fighter-info"><img src="${esc(f.appearance?.faceAsset || f.asset || "/assets/" + (builtins.some((b) => b.id === f.id) ? f.id : "akari") + ".svg")}" alt="${esc(f.name)}"><div><span class="pill" style="color:${f.color}">${esc(f.element)}</span><h3>${esc(f.special)}</h3><p>Special · 25 energi</p><h3>${esc(f.ultimate)}</h3><p>Ultimate · 100 energi</p><div class="stats-inline">HP ${f.hp} · ATK ${f.attack}<br>DEF ${f.defense} · SPD ${f.speed}</div><p class="hint">AI personality: ${esc(f.personality)}<br>Version ${f.version} · ${f.published ? "Published" : "Draft"}</p></div></div>`,
   );
 }
 function fightersPage() {
@@ -650,7 +713,7 @@ function fightersPage() {
       .filter((f) => !f.disabled)
       .map(
         (f) =>
-          `<article class="fighter-card" style="--fighter-color:${f.color}"><div class="fighter-art"><img src="${esc(f.asset || "/assets/" + (builtins.some((b) => b.id === f.id) ? f.id : "akari") + ".svg")}" alt="${esc(f.name)}"><span class="tiny-pill">${f.published ? "PUBLISHED" : "DRAFT"} · V${f.version}</span><span class="fighter-element">${esc(f.element)}</span></div><div class="fighter-detail"><div class="eyebrow">${esc(f.title)}</div><h2>${esc(f.name)}</h2><p>${esc(f.special)} <span>→</span> ${esc(f.ultimate)}</p><div class="fighter-stats">${[
+          `<article class="fighter-card" style="--fighter-color:${f.color}"><div class="fighter-art"><img src="${esc(f.appearance?.faceAsset || f.asset || "/assets/" + (builtins.some((b) => b.id === f.id) ? f.id : "akari") + ".svg")}" alt="${esc(f.name)}"><span class="tiny-pill">${f.published ? "PUBLISHED" : "DRAFT"} · V${f.version}</span><span class="fighter-element">${esc(f.element)}</span></div><div class="fighter-detail"><div class="eyebrow">${esc(f.title)}</div><h2>${esc(f.name)}</h2><p>${esc(f.special)} <span>→</span> ${esc(f.ultimate)}</p><div class="fighter-stats">${[
             ["HP", f.hp],
             ["ATK", f.attack],
             ["DEF", f.defense],
@@ -691,7 +754,7 @@ function fighterEditor(existing?: Fighter) {
   modalOpen(
     existing ? "Edit " + f.name : "Create your fighter",
     "Draft dapat disimpan. Publish memerlukan statistik dan semua animasi valid.",
-    `<form id="fighter-form" class="form-stack"><div class="form-grid">${field("name", "Nama", f.name, "text", 'required maxlength="32"')}${field("title", "Title", f.title)}${field("element", "Elemen", f.element)}${field("color", "Warna template", f.color, "color")}${field("hp", "HP · 500–2000", f.hp, "number", 'min="500" max="2000" required')}${field("attack", "Attack · 50–150", f.attack, "number", 'min="50" max="150" required')}${field("defense", "Defense · 50–150", f.defense, "number", 'min="50" max="150" required')}${field("speed", "Speed · 60–140", f.speed, "number", 'min="60" max="140" required')}${field("special", "Nama special", f.special)}${field("ultimate", "Nama ultimate", f.ultimate)}<label>AI personality<select name="personality">${["aggressive", "balanced", "counter", "defensive"].map((v) => `<option ${v === f.personality ? "selected" : ""}>${v}</option>`).join("")}</select></label></div><details><summary>Character Creator · template warna</summary><div class="form-grid" style="margin-top:15px">${field("hairColor", "Warna rambut", f.appearance?.hairColor || f.color, "color")}${field("outfitColor", "Warna kostum", f.appearance?.outfitColor || "#252239", "color")}</div></details><details><summary>Combat Editor · skill, frame data & hurtbox</summary><p class="hint">Simulasi 30 tick/s. Attack aktif setelah startup; cooldown minimal total startup + active + recovery. Hitbox mengikuti arah serangan. Frame visual tetap membutuhkan sprite yang sesuai.</p><div class="form-grid">${field("hurtWidth", "Hurtbox width · 30–100", f.combat?.hurtbox.width || 50, "number")}${field("hurtHeight", "Hurtbox height · 80–180", f.combat?.hurtbox.height || 140, "number")}${field("comboWindow", "Combo window · 15–90 tick", f.combat?.comboWindow || 45, "number")}${field("comboMultiplier", "Combo multiplier · 1–1.2", f.combat?.comboMultiplier || 1, "number", 'step="0.05"')}</div><div class="table-wrap skill-editor"><table><thead><tr><th>SKILL</th>${["damage", "range", "start", "active", "recovery", "cooldown", "cost", "energy"].map((k) => `<th>${k}</th>`).join("")}</tr></thead><tbody>${Object.entries(
+    `<form id="fighter-form" class="form-stack"><div class="form-grid">${field("name", "Nama", f.name, "text", 'required maxlength="32"')}${field("title", "Title", f.title)}${field("element", "Elemen", f.element)}${field("color", "Warna template", f.color, "color")}${field("hp", "HP · 500–2000", f.hp, "number", 'min="500" max="2000" required')}${field("attack", "Attack · 50–150", f.attack, "number", 'min="50" max="150" required')}${field("defense", "Defense · 50–150", f.defense, "number", 'min="50" max="150" required')}${field("speed", "Speed · 60–140", f.speed, "number", 'min="60" max="140" required')}${field("special", "Nama special", f.special)}${field("ultimate", "Nama ultimate", f.ultimate)}<label>AI personality<select name="personality">${["aggressive", "balanced", "counter", "defensive"].map((v) => `<option ${v === f.personality ? "selected" : ""}>${v}</option>`).join("")}</select></label></div><details open><summary>Character Creator · wajah dan pakaian terpisah</summary><p class="hint">Ganti satu bagian tanpa mengubah statistik atau animasi. Upload wajah hanya berlaku pada rig modular; spritesheet utuh tetap memakai gambar asalnya.</p><div class="form-grid" style="margin-top:15px"><label>Model karakter<select name="renderMode"><option value="rig" ${!f.asset ? "selected" : ""}>Rig modular · wajah/pakaian terpisah</option><option value="sheet" ${f.asset ? "selected" : ""}>Spritesheet utuh</option></select></label><label>Preset wajah<select name="facePreset"><option value="">Wajah asli</option>${["akari", "ren", "yuki", "kuro"].map((id) => `<option value="${id}" ${f.appearance?.facePreset === id ? "selected" : ""}>${id}</option>`).join("")}</select></label><label>Model pakaian<select name="outfitStyle"><option value="">Pakaian asli</option>${["samurai", "jacket", "robe"].map((id) => `<option value="${id}" ${f.appearance?.outfitStyle === id ? "selected" : ""}>${({ samurai: "Samurai", jacket: "Jaket", robe: "Jubah" } as Record<string, string>)[id]}</option>`).join("")}</select></label>${field("hairColor", "Warna rambut", f.appearance?.hairColor || { akari: "#642c40", ren: "#243c57", yuki: "#315c65", kuro: "#3d334f" }[f.id] || "#642c40", "color")}${field("outfitColor", "Warna kostum", f.appearance?.outfitColor || { akari: "#382635", ren: "#25344a", yuki: "#263e43", kuro: "#302b43" }[f.id] || "#382635", "color")}</div><div class="upload-area"><label>Wajah custom · PNG/WebP maksimal 1024 × 1024<input id="face-file" type="file" accept="image/png,image/webp"></label><p class="hint">Gunakan gambar wajah terpotong menghadap kanan, ideal 280 × 340 px dengan background transparan. Rambut bawaan dan tubuh tetap digunakan.</p><p id="face-status">${f.appearance?.faceAsset ? "Wajah custom tersimpan" : "Memakai wajah preset"}</p><button class="button small" type="button" id="remove-face">Hapus wajah custom</button><img id="face-preview" alt="Preview wajah custom" ${f.appearance?.faceAsset ? `src="${esc(f.appearance.faceAsset)}"` : "hidden"} style="max-width:140px;max-height:170px;object-fit:contain"></div></details><details><summary>Combat Editor · skill, frame data & hurtbox</summary><p class="hint">Simulasi 30 tick/s. Attack aktif setelah startup; cooldown minimal total startup + active + recovery. Hitbox mengikuti arah serangan. Frame visual tetap membutuhkan sprite yang sesuai.</p><div class="form-grid">${field("hurtWidth", "Hurtbox width · 30–100", f.combat?.hurtbox.width || 50, "number")}${field("hurtHeight", "Hurtbox height · 80–180", f.combat?.hurtbox.height || 140, "number")}${field("comboWindow", "Combo window · 15–90 tick", f.combat?.comboWindow || 45, "number")}${field("comboMultiplier", "Combo multiplier · 1–1.2", f.combat?.comboMultiplier || 1, "number", 'step="0.05"')}</div><div class="table-wrap skill-editor"><table><thead><tr><th>SKILL</th>${["damage", "range", "start", "active", "recovery", "cooldown", "cost", "energy"].map((k) => `<th>${k}</th>`).join("")}</tr></thead><tbody>${Object.entries(
       defaultSkills,
     )
       .map(
@@ -710,6 +773,43 @@ function fighterEditor(existing?: Fighter) {
       )}</tbody></table></div><div class="hitbox-preview"><span>HURTBOX</span><div class="hurtbox-outline"><span>FIGHTER</span></div><div class="hitbox-outline">ACTIVE HITBOX →</div></div><p class="hint">Preview diagram: hurtbox pusat fighter, hitbox memanjang ke arah lawan. Damage/collision diputuskan server. Editor keyframe hitbox per frame belum tersedia.</p></details><div class="upload-area"><label>${icon("upload")} PNG / WebP spritesheet · Maks. 8 MB<input id="sprite-file" type="file" accept="image/png,image/webp"></label><p id="upload-status">${f.asset ? "Aset tersimpan: " + esc(f.asset) : "Opsional: gunakan template bawaan jika tidak mengunggah aset."}</p></div><div class="form-grid">${field("frameWidth", "Frame width", f.frameWidth || 128, "number", 'min="8" max="2048"')}${field("frameHeight", "Frame height", f.frameHeight || 128, "number", 'min="8" max="2048"')}</div><details ${f.asset ? "open" : ""}><summary>Mapping animasi spritesheet</summary><p class="hint">Index frame mulai 0. Sembilan animasi dasar wajib saat publish; mapping 20 ability baru opsional dan memakai pose dasar bila kosong. Gambar tunggal tidak cukup untuk pose berbeda.</p><div class="animation-table"><b>Animation</b><b>Start</b><b>End</b><b>FPS</b>${[...animationKeys, ...optionalAnimationKeys].map((k) => `<span>${k}${(optionalAnimationKeys as readonly string[]).includes(k) ? " · opsional" : ""}</span>${["start", "end", "fps"].map((prop) => `<input aria-label="${k} ${prop}" name="${k}_${prop}" type="number" min="${prop === "fps" ? 1 : 0}" value="${(f.animations?.[k] as any)?.[prop] ?? (prop === "fps" ? 12 : "")}">`).join("")}`).join("")}</div></details><p class="form-error" role="alert"></p><div class="modal-actions"><button class="button" type="submit" name="publish" value="no">Simpan draft</button><button class="button primary" type="submit" name="publish" value="yes">${icon("check")} Publish fighter</button></div></form>`,
   );
   let asset = f.asset;
+  let faceAsset = f.appearance?.faceAsset;
+  let faceUploading = false;
+  const faceInput = document.querySelector<HTMLInputElement>("#face-file")!;
+  faceInput.onchange = async () => {
+    const file = faceInput.files?.[0];
+    if (!file) return;
+    faceUploading = true;
+    try {
+      const data = new FormData();
+      data.set("file", file);
+      const uploaded = await api("/upload", data);
+      if (uploaded.width > 1024 || uploaded.height > 1024)
+        throw Error("Wajah maksimal 1024 × 1024 px.");
+      faceAsset = uploaded.asset;
+      const preview =
+        document.querySelector<HTMLImageElement>("#face-preview")!;
+      preview.src = faceAsset!;
+      preview.hidden = false;
+      document.querySelector("#face-status")!.textContent =
+        `${file.name} · wajah siap disimpan`;
+      document.querySelector<HTMLSelectElement>(
+        'select[name="renderMode"]',
+      )!.value = "rig";
+    } catch (error) {
+      toast((error as Error).message, true);
+    } finally {
+      faceUploading = false;
+      faceInput.value = "";
+    }
+  };
+  document.querySelector("#remove-face")!.addEventListener("click", () => {
+    if (faceUploading) return;
+    faceAsset = undefined;
+    document.querySelector<HTMLImageElement>("#face-preview")!.hidden = true;
+    document.querySelector("#face-status")!.textContent =
+      "Memakai wajah preset";
+  });
   document.querySelector<HTMLInputElement>("#sprite-file")!.onchange = async (
     e,
   ) => {
@@ -732,7 +832,12 @@ function fighterEditor(existing?: Fighter) {
   ) => {
     e.preventDefault();
     const form = e.currentTarget as HTMLFormElement;
+    if (faceUploading) {
+      toast("Tunggu upload wajah selesai.", true);
+      return;
+    }
     const d = Object.fromEntries(new FormData(form));
+    const modular = d.renderMode === "rig";
     const next: any = {
       ...f,
       name: d.name,
@@ -742,7 +847,7 @@ function fighterEditor(existing?: Fighter) {
       special: d.special,
       ultimate: d.ultimate,
       personality: d.personality,
-      asset,
+      asset: modular ? undefined : asset,
       published: (e as SubmitEvent).submitter?.getAttribute("value") === "yes",
     };
     for (const k of [
@@ -754,7 +859,17 @@ function fighterEditor(existing?: Fighter) {
       "frameHeight",
     ])
       next[k] = Number(d[k]);
-    next.appearance = { hairColor: d.hairColor, outfitColor: d.outfitColor };
+    next.appearance = {
+      hairColor: d.hairColor,
+      outfitColor: d.outfitColor,
+      ...(modular
+        ? {
+            facePreset: d.facePreset || undefined,
+            outfitStyle: d.outfitStyle || undefined,
+            faceAsset,
+          }
+        : {}),
+    };
     next.combat = {
       hurtbox: { width: Number(d.hurtWidth), height: Number(d.hurtHeight) },
       comboWindow: Number(d.comboWindow),
@@ -766,7 +881,7 @@ function fighterEditor(existing?: Fighter) {
       for (const prop of Object.keys(spec))
         next.combat.skills[key][prop] = Number(d["skill_" + key + "_" + prop]);
     }
-    if (asset) {
+    if (next.asset) {
       next.animations = {};
       for (const key of [...animationKeys, ...optionalAnimationKeys]) {
         if (d[key + "_start"] === "" || d[key + "_end"] === "") {
@@ -1266,7 +1381,13 @@ async function render() {
     shell(webhooksPage());
     await bindWebhooks();
   } else if (view === "/admin/settings") {
-    shell(settingsPage());
+    shell(
+      settingsPage() +
+        `<section class="panel"><div class="panel-header"><h2>Akun admin</h2><button class="button" id="edit-account">Ganti username / password</button></div><p class="panel-note">Perubahan akun berlaku untuk lingkungan ini dan mengeluarkan semua sesi admin.</p></section>`,
+    );
+    document
+      .querySelector("#edit-account")!
+      .addEventListener("click", () => void accountEditor());
     document.querySelector<HTMLFormElement>("#settings-form")!.onsubmit =
       async (e) => {
         e.preventDefault();
@@ -1553,7 +1674,12 @@ setInterval(() => {
   }
 }, 150);
 setInterval(async () => {
-  if (!authenticated || !["/admin", "/game", "/"].includes(view)) return;
+  if (
+    !authenticated ||
+    mustChangePassword ||
+    !["/admin", "/game", "/"].includes(view)
+  )
+    return;
   try {
     const detailed = await api("/admin/state");
     state = { ...state, logs: detailed.logs };
@@ -1567,7 +1693,8 @@ async function boot() {
     const auth = await api("/auth");
     authenticated = auth.authenticated;
     csrf = auth.csrf || "";
-    if (authenticated) await catalog();
+    mustChangePassword = !!auth.mustChangePassword;
+    if (authenticated && !mustChangePassword) await catalog();
     const initial = await api("/game/state");
     state = initial;
   } catch (e) {
@@ -1577,7 +1704,8 @@ async function boot() {
       true,
     );
   }
-  render();
+  await render();
   connect();
+  if (mustChangePassword) await accountEditor(true);
 }
 boot();

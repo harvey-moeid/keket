@@ -5,13 +5,13 @@ Adapter diverifikasi terhadap source [harvey-moeid/tiktok-live-konektor](https:/
 ## Menghubungkan
 
 1. Provision/deploy Worker game menggunakan [panduan deployment](DEPLOYMENT.md). D1 ID bawaan masih placeholder; belum ada deployment remote dalam workspace ini.
-2. Buat secret acak minimal 32 karakter melalui password manager. Simpan **nilai yang sama** sebagai `WEBHOOK_SIGNING_SECRET` pada environment konektor dan Worker game. Gunakan input interaktif `npx wrangler secret put WEBHOOK_SIGNING_SECRET` untuk preview atau tambah `--env production` untuk production. Jangan menaruh secret pada frontend, URL, source, atau chat. Untuk pengembangan lokal, simpan di `.dev.vars` yang diabaikan Git lalu restart Worker.
+2. Buat secret acak minimal 32 karakter melalui password manager. Simpan **nilai yang sama** sebagai `WEBHOOK_SIGNING_SECRET` pada environment konektor dan Worker game. Gunakan input interaktif `npx wrangler secret put WEBHOOK_SIGNING_SECRET` untuk Worker Production yang dikonfigurasi saat ini (tanpa `--env production`). Jangan menaruh secret pada frontend, URL, source, atau chat. Untuk pengembangan lokal, simpan di `.dev.vars` yang diabaikan Git lalu restart Worker.
 3. Opsional namun disarankan: tambahkan `TIKTOK_ROOM_ID` sebagai var Worker untuk mengikat satu room aktif. Nilai harus sama persis dengan string `roomId` pada envelope. Perbarui saat room LIVE berubah; ketidakcocokan ditolak, bukan dipindahkan otomatis.
 4. Pada dashboard **konektor → Integrasi Webhook**, tambahkan `https://<domain-game>/api/game/tiktok`, aktifkan, pilih `chat,like,gift,follow,share`, lalu simpan. Konektor tidak mengirim Bearer token untuk endpoint ini. URL tujuan harus HTTPS publik; localhost/private tunnel endpoint tidak diterima oleh validasi konektor.
 5. Start LIVE secara manual di konektor ketika broadcaster aktif. Di game, pilih kontrol webhook atau AI + webhook dan **Mulai pertandingan** secara manual. Penonton memilih `!merah` atau `!biru`, lalu memberi perintah sesuai mapping. Event yang datang saat idle tidak memulai game.
 6. Periksa penerimaan event dan queue keputusan di control room. Label koneksi overlay menunjukkan WebSocket **game**, bukan bukti TikTok LIVE aktif; penerimaan webhook terakhir menunjukkan aktivitas event saja. Uji kedua tim, gift streak, retry/duplikat dan putus koneksi sebelum produksi.
 
-Secret HMAC ini terpisah dari `WEBHOOK_SECRET` untuk endpoint kontrak internal, password admin, dan API key konektor. Preview dan production sebaiknya menggunakan secret/konektor tujuan terpisah. Secret signature konektor berlaku bagi semua tujuan webhook layanan itu; jangan berbagi dengan tujuan yang tidak dipercaya. Rotasi pada kedua layanan.
+Secret HMAC ini terpisah dari `WEBHOOK_SECRET` untuk endpoint kontrak internal, password admin, dan API key konektor. Konfigurasi saat ini memiliki satu Worker Production; pengembangan lokal harus memakai secret/konektor tujuan terpisah. Secret signature konektor berlaku bagi semua tujuan webhook layanan itu; jangan berbagi dengan tujuan yang tidak dipercaya. Rotasi pada kedua layanan.
 
 ## Pemetaan
 

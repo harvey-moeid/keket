@@ -7,7 +7,7 @@ Validasi ini dilakukan pada environment cloud Linux, Node 24.19, Vite 7.3.7, Wra
 | Pemeriksaan | Hasil | Bukti/metode |
 |---|---|---|
 | TypeScript client & Worker, Vite production build | Lulus | `npm run build` |
-| Combat/security suite | Lulus — 39 tests, 0 skipped | `npm test` |
+| Combat/security suite | Lulus — 44 tests, 0 skipped | `npm test` |
 | Advisori dependensi | 0 known vulnerabilities | `npm audit` setelah upgrade Vite/Wrangler |
 | Startup dan migrasi berulang | Lulus | `npm run dev`; D1 melaporkan no migrations pada pengulangan |
 | Manual vs manual menghasilkan hit/damage | Lulus | API: 15 langkah Merah, light attack; HP Biru berkurang, HP Merah tetap |
@@ -37,7 +37,7 @@ Fixtures bersifat sintetis dan tidak membuktikan TikTok LIVE nyata. Pengujian ti
 
 ## Checklist manual operator sebelum LIVE
 
-Catat perangkat, versi browser, environment dan hasil setiap skenario. Jalankan pada Preview, bukan pertandingan production.
+Catat perangkat, versi browser, environment dan hasil setiap skenario. Gunakan sesi uji lokal atau room Sandbox tanpa penonton nyata; konfigurasi upstream saat ini tidak menyediakan Worker Preview terpisah.
 
 - [ ] Mainkan manual vs AI selama beberapa ronde: movement, jump, light/heavy, block, dodge, special dan ultimate.
 - [ ] Mainkan manual vs manual; periksa kedua set keyboard dan kontrol sentuh.
@@ -51,7 +51,7 @@ Catat perangkat, versi browser, environment dan hasil setiap skenario. Jalankan 
 - [ ] Putuskan webhook: webhook-only idle, AI + webhook tetap AI; tidak ada match restart otomatis.
 - [ ] Gunakan browser source OBS landscape dan portrait; periksa crop, HUD, performance dan reconnect.
 - [ ] Verifikasi secrets terpisah dan tidak ada token/password di HTML, overlay, export publik atau console.
-- [ ] Verifikasi resource dan data Preview/Production terisolasi; cocokkan analytics dengan hasil match.
+- [ ] Verifikasi storage lokal dan Production terisolasi serta sandbox tidak menulis riwayat utama; cocokkan analytics dengan hasil match.
 - [ ] Tetapkan lisensi aset, retensi dan pemberitahuan privasi sebelum penonton nyata.
 
 ## Batas material
@@ -81,3 +81,7 @@ Katalog menjadi 32 action dan 14 profil serangan. Engine/API menambahkan 20 tes 
 ## GitHub CI/CD
 
 Workflow diperiksa dengan actionlint 1.7.7 dan parser YAML. Script konfigurasi deployment diuji menggunakan credential fixture tanpa koneksi remote: perubahan ID hanya berlaku untuk environment tujuan, file asal tetap sama, credential tidak masuk file hasil, dan secret kosong/ID invalid/placeholder/target unknown ditolak sebelum file dibuat. CI lokal tetap lulus format, 39 tes dan build. Eksekusi GitHub Actions, environment protection serta deployment remote belum diverifikasi; instruksi aktivasi ada di [DEPLOYMENT.md](DEPLOYMENT.md#github-actions-cicd).
+
+## Karakter modular dan akun admin
+
+Tambahan 5 tes memakai SQLite in-memory dengan SQL migrasi aktual: bootstrap wajib rotasi, CSRF/current password/validation, hash persisten dan pencabutan sesi termasuk login lama yang selesai sesudah rotasi, rate cap, serta validasi aset wajah modular. Total suite 44 tes. Browser terhadap Worker lokal memverifikasi login bootstrap, konfirmasi password, rotasi username/password, login kembali dan form akun; data akun QA dibersihkan setelah pengujian. Browser fixture terisolasi memverifikasi upload/publish wajah dengan pilihan pakaian, statistik/warna rambut tetap, rendering kedua arah pada 9 pose serta layout mobile 390 px tanpa page error. Layer wajah statis; pakaian memakai preset, bukan upload rig bebas. Lihat [panduan](CHARACTER_PARTS.md). Deployment akun Cloudflare masih memerlukan secret/var bootstrap privat.

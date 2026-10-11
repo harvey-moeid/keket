@@ -106,7 +106,13 @@ Object.assign(defaultSkills, expandedSkills);
 
 export interface Fighter {
   combat?: CombatProfile;
-  appearance?: { hairColor: string; outfitColor: string };
+  appearance?: {
+    hairColor: string;
+    outfitColor: string;
+    facePreset?: "akari" | "ren" | "yuki" | "kuro";
+    outfitStyle?: "samurai" | "jacket" | "robe";
+    faceAsset?: string;
+  };
   id: string;
   version: number;
   name: string;
@@ -505,9 +511,33 @@ export function validateFighter(f: Fighter) {
       errors.push(`${k}: ${min}–${max}.`);
   }
   if (f.appearance)
-    for (const color of Object.values(f.appearance))
+    for (const color of [f.appearance.hairColor, f.appearance.outfitColor])
       if (!/^#[0-9a-f]{6}$/i.test(color))
         errors.push("Warna Character Creator tidak valid.");
+  if (
+    f.appearance?.facePreset &&
+    !["akari", "ren", "yuki", "kuro"].includes(f.appearance.facePreset)
+  )
+    errors.push("Preset wajah tidak valid.");
+  if (
+    f.appearance?.outfitStyle &&
+    !["samurai", "jacket", "robe"].includes(f.appearance.outfitStyle)
+  )
+    errors.push("Model pakaian tidak valid.");
+  if (
+    f.appearance?.faceAsset &&
+    !/^\/api\/assets\/[a-f0-9-]+\.(png|webp)$/.test(f.appearance.faceAsset)
+  )
+    errors.push("Path wajah tidak valid.");
+  if (
+    f.asset &&
+    (f.appearance?.faceAsset ||
+      f.appearance?.facePreset ||
+      f.appearance?.outfitStyle)
+  )
+    errors.push(
+      "Wajah/pakaian terpisah memerlukan rig modular, bukan spritesheet utuh.",
+    );
   if (f.combat) {
     const c = f.combat;
     if (

@@ -29,7 +29,7 @@ await once("wrangler/bin/wrangler.js", [
   "d1",
   "migrations",
   "apply",
-  "kizuna-preview",
+  "kizuna-production",
   "--local",
 ]);
 const api = run("wrangler/bin/wrangler.js", ["dev", "--port", "8787"]);
