@@ -35,4 +35,5 @@ jobs:
           npx wrangler d1 migrations apply kizuna-production --remote
           npx wrangler deploy
       - name: Record deployed commit
-        run: printf '### Production deployment\nCommit: `%s`\n' "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+        run: |
+          printf '### Production deployment\nCommit: `%s`\n' "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
