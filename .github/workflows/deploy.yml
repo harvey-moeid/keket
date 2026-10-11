@@ -2,66 +2,37 @@ name: Deploy Cloudflare
 on:
   push:
     branches: [main]
-  release:
-    types: [published]
   workflow_dispatch:
-    inputs:
-      target:
-        description: Cloudflare environment
-        type: choice
-        required: true
-        default: preview
-        options: [preview, production]
 permissions:
   contents: read
 concurrency:
-  group: deploy-${{ github.event_name == 'release' && 'production' || inputs.target || 'preview' }}
+  group: deploy-production
   cancel-in-progress: false
 jobs:
   validate:
-    if: github.event_name != 'release' || !github.event.release.prerelease
     uses: ./.github/workflows/ci.yml
   deploy:
     needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    environment: ${{ github.event_name == 'release' && 'production' || inputs.target || 'preview' }}
+    environment: production
     env:
-      KIZUNA_DEPLOY_TARGET: ${{ github.event_name == 'release' && 'production' || inputs.target || 'preview' }}
       WRANGLER_SEND_METRICS: "false"
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          fetch-depth: 0
-      - name: Require a commit on main
-        run: git merge-base --is-ancestor HEAD origin/main
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: "24"
           cache: npm
       - run: npm ci
-      - name: Prepare environment configuration
-        env:
-          D1_DATABASE_ID: ${{ vars.D1_DATABASE_ID }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: node scripts/prepare-deploy.mjs
+      - run: node scripts/prepare-deploy.mjs
       - run: npm run build
-      - name: Migrate D1 and deploy Worker
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      - name: Migrate D1 and deploy production Worker
         run: |
           set -euo pipefail
-          export XDG_CONFIG_HOME="$PWD/.wrangler/config"
-          export WRANGLER_LOG_PATH=/tmp/kizuna-wrangler-logs
-          if [ "$KIZUNA_DEPLOY_TARGET" = "production" ]; then
-            npx wrangler d1 migrations apply kizuna-production --remote --env production --config .wrangler-deploy.toml
-            npx wrangler deploy --env production --config .wrangler-deploy.toml
-          else
-            npx wrangler d1 migrations apply kizuna-preview --remote --config .wrangler-deploy.toml
-            npx wrangler deploy --config .wrangler-deploy.toml
-          fi
+          npx wrangler d1 migrations apply kizuna-production --remote
+          npx wrangler deploy
       - name: Record deployed commit
-        run: |
-          printf '### Deployment\nEnvironment: `%s`\n\nCommit: `%s`\n' "$KIZUNA_DEPLOY_TARGET" "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+        run: printf '### Production deployment\nCommit: `%s`\n' "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
