@@ -18,7 +18,7 @@ new_sqlite_classes = ["MatchRoom"]
 [[d1_databases]]
 binding = "DB"
 database_name = "kizuna-preview"
-database_id = "00000000-0000-0000-0000-000000000001"
+database_id = "897497ae-295a-4486-9697-17f469f83da0"
 migrations_dir = "migrations"
 [[r2_buckets]]
 binding = "ASSET_BUCKET"
@@ -34,8 +34,12 @@ class_name = "MatchRoom"
 [[env.production.d1_databases]]
 binding = "DB"
 database_name = "kizuna-production"
-database_id = "00000000-0000-0000-0000-000000000002"
+database_id = "65db506b-4e7e-4926-b8cc-56cc3fa88c16"
 migrations_dir = "migrations"
 [[env.production.r2_buckets]]
 binding = "ASSET_BUCKET"
 bucket_name = "kizuna-production-assets"
+
+[[env.production.migrations]]
+tag = "v1"
+new_sqlite_classes = ["MatchRoom"]
