@@ -1,40 +1,19 @@
+import { memoryKV, memoryDurableStorage } from "./storage-fixture";
+import { AuthStore } from "./auth-store";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import worker, { type Env } from "./index";
 import { expandedMappings, fighters, defaultSkills } from "../shared/model";
 
-function fixture() {
-  const writes: { key: string; value: string }[] = [];
+async function fixture() {
+  const kv = memoryKV();
+  const storage = memoryDurableStorage().binding;
+  const auth = new AuthStore({ storage } as DurableObjectState);
   const rooms: string[] = [];
   const env = {
     APP_ENV: "preview",
-    DB: {
-      prepare(query: string) {
-        let bindings: unknown[] = [];
-        return {
-          bind(...args: unknown[]) {
-            bindings = args;
-            return this;
-          },
-          async first() {
-            return query.includes("FROM sessions")
-              ? {
-                  id: "00000000-0000-4000-8000-000000000000",
-                  csrf: "test-only-csrf",
-                  expires: Date.now() + 10000,
-                }
-              : null;
-          },
-          async run() {
-            writes.push({
-              key: bindings[0] as string,
-              value: bindings[1] as string,
-            });
-            return { success: true };
-          },
-        };
-      },
-    },
+    DATA: kv.binding,
+    AUTH: { idFromName: (name: string) => name, get: () => auth },
     ROOMS: {
       idFromName(name: string) {
         return name;
@@ -49,6 +28,12 @@ function fixture() {
       },
     },
   } as unknown as Env;
+  await storage.put("session:00000000-0000-4000-8000-000000000000", {
+    id: "00000000-0000-4000-8000-000000000000",
+    csrf: "test-only-csrf",
+    expires: Date.now() + 10000,
+    credential_version: "bootstrap",
+  });
   const send = (path: string, value: unknown, csrf = "test-only-csrf") =>
     worker.fetch(
       new Request("https://game.test/api" + path, {
@@ -63,11 +48,11 @@ function fixture() {
       }),
       env,
     );
-  return { send, writes, rooms };
+  return { send, writes: kv.writes, rooms };
 }
 
 test("admin mapping API accepts all 20 new abilities, updates both rooms and retains validation/CSRF", async () => {
-  const f = fixture();
+  const f = await fixture();
   assert.equal((await f.send("/mappings", expandedMappings)).status, 200);
   assert.deepEqual(JSON.parse(f.writes[0].value), expandedMappings);
   assert.deepEqual(f.rooms, ["preview", "sandbox"]);
@@ -84,7 +69,7 @@ test("admin mapping API accepts all 20 new abilities, updates both rooms and ret
 });
 
 test("fighter API persists all 14 editable skills and rejects invalid new skill frame data", async () => {
-  const f = fixture();
+  const f = await fixture();
   const fighter = {
     ...fighters[0],
     id: "",

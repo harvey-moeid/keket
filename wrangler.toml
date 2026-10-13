@@ -21,11 +21,17 @@ class_name = "MatchRoom"
 tag = "v1"
 new_sqlite_classes = ["MatchRoom"]
 
-[[d1_databases]]
-binding = "DB"
-database_name = "kizuna-production"
-database_id = "65db506b-4e7e-4926-b8cc-56cc3fa88c16"
-migrations_dir = "migrations"
+[[durable_objects.bindings]]
+name = "AUTH"
+class_name = "AuthStore"
+
+[[migrations]]
+tag = "v2-auth-kv"
+new_sqlite_classes = ["AuthStore"]
+
+# Wrangler provisions this namespace on the first deploy and reuses the binding.
+[[kv_namespaces]]
+binding = "DATA"
 
 [[r2_buckets]]
 binding = "ASSET_BUCKET"

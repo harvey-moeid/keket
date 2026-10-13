@@ -7,7 +7,15 @@ const config = readFileSync("wrangler.toml", "utf8");
 if (!config.includes('name = "kizuna-production"')) {
   throw new Error("Production Worker configuration is required");
 }
-if (!config.includes('database_id = "65db506b-4e7e-4926-b8cc-56cc3fa88c16"')) {
-  throw new Error("Production D1 binding is missing");
+if (
+  !/\[\[kv_namespaces\]\]\s*(?:#[^\n]*\n\s*)?binding\s*=\s*"DATA"/.test(config)
+) {
+  throw new Error("Production KV binding DATA is missing");
+}
+if (config.includes("[[d1_databases]]")) {
+  throw new Error("D1 is no longer supported; use KV DATA");
+}
+if (!config.includes('class_name = "AuthStore"')) {
+  throw new Error("Production authentication Durable Object is missing");
 }
 console.log("Production Cloudflare configuration verified");

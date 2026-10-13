@@ -1699,8 +1699,7 @@ async function boot() {
     state = initial;
   } catch (e) {
     toast(
-      "API belum tersedia. Jalankan server Worker dan migrasi D1. " +
-        (e as Error).message,
+      "API belum tersedia. Jalankan server Worker. " + (e as Error).message,
       true,
     );
   }

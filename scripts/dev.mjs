@@ -25,13 +25,6 @@ try {
 } catch {
   await once("vite/bin/vite.js", ["build"]);
 }
-await once("wrangler/bin/wrangler.js", [
-  "d1",
-  "migrations",
-  "apply",
-  "kizuna-production",
-  "--local",
-]);
 const api = run("wrangler/bin/wrangler.js", ["dev", "--port", "8787"]);
 const ui = run("vite/bin/vite.js", [
   "--host",

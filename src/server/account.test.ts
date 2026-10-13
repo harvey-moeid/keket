@@ -1,35 +1,17 @@
+import { memoryKV, memoryDurableStorage } from "./storage-fixture";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { DatabaseSync } from "node:sqlite";
-import { readFileSync } from "node:fs";
-import worker, { type Env } from "./index";
-import { passwordHash, verifyPassword } from "./security";
+import worker, { AuthStore, type Env } from "./index";
+import { verifyPassword } from "./security";
 import { fighters } from "../shared/model";
 
 async function fixture() {
-  const db = new DatabaseSync(":memory:");
-  db.exec(readFileSync("migrations/0001_initial.sql", "utf8"));
-  db.exec(readFileSync("migrations/0002_account_credentials.sql", "utf8"));
-  function prepare(query: string) {
-    let values: any[] = [];
-    return {
-      bind(...args: any[]) {
-        values = args;
-        return this;
-      },
-      async first() {
-        return db.prepare(query).get(...values) || null;
-      },
-      async run() {
-        return {
-          meta: { changes: Number(db.prepare(query).run(...values).changes) },
-        };
-      },
-    };
-  }
+  const kv = memoryKV();
+  const storage = memoryDurableStorage().binding;
+  const auth = new AuthStore({ storage } as DurableObjectState);
   const env = {
     ADMIN_USERNAME: "admin",
-    ADMIN_PASSWORD_HASH: await passwordHash("initial8"),
+    ADMIN_PASSWORD: "initial8",
     ADMIN_REQUIRE_PASSWORD_CHANGE: "true",
     APP_ENV: "preview",
     ROOMS: {
@@ -40,21 +22,8 @@ async function fixture() {
         },
       }),
     },
-    DB: {
-      prepare,
-      async batch(statements: ReturnType<typeof prepare>[]) {
-        db.exec("BEGIN");
-        try {
-          const results = [];
-          for (const stmt of statements) results.push(await stmt.run());
-          db.exec("COMMIT");
-          return results;
-        } catch (error) {
-          db.exec("ROLLBACK");
-          throw error;
-        }
-      },
-    },
+    DATA: kv.binding,
+    AUTH: { idFromName: (name: string) => name, get: () => auth },
   } as unknown as Env;
   let cookie = "",
     csrf = "";
@@ -85,8 +54,18 @@ async function fixture() {
     }
     return response;
   }
-  return { db, env, send, login };
+  return { storage, kv, auth, env, send, login };
 }
+
+test("bootstrap accepts plain password, rejects wrong password and missing secret", async () => {
+  const f = await fixture();
+  assert.equal((await f.login("admin", "wrong")).status, 401);
+  assert.equal((await f.login()).status, 200);
+  f.env.ADMIN_PASSWORD = undefined;
+  const auth = (await (await f.send("/auth")).json()) as any;
+  assert.equal(auth.configured, false);
+  assert.equal((await f.login()).status, 503);
+});
 
 test("initial admin must rotate password; account response contains no password hash", async () => {
   const f = await fixture();
@@ -95,7 +74,6 @@ test("initial admin must rotate password; account response contains no password 
   const account = await (await f.send("/account")).json();
   assert.deepEqual(account, { username: "admin", mustChangePassword: true });
   assert.equal((await f.send("/auth")).status, 200);
-  f.db.close();
 });
 test("account rotation rejects CSRF, wrong current password and short/same password", async () => {
   const f = await fixture();
@@ -117,15 +95,7 @@ test("account rotation rejects CSRF, wrong current password and short/same passw
     (await f.send("/account", { ...update, newPassword: "short" })).status,
     400,
   );
-  assert.equal(
-    f.db
-      .prepare(
-        "SELECT COUNT(*) AS n FROM documents WHERE key='admin_credentials'",
-      )
-      .get()!.n,
-    0,
-  );
-  f.db.close();
+  assert.equal(await f.storage.get("admin_credentials"), undefined);
 });
 test("rotation persists salted hash, revokes sessions and rejects stale in-flight logins", async () => {
   const f = await fixture();
@@ -140,27 +110,25 @@ test("rotation persists salted hash, revokes sessions and rejects stale in-fligh
     ).status,
     200,
   );
-  assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM sessions").get()!.n, 0);
-  const saved = JSON.parse(
-    f.db
-      .prepare("SELECT value FROM documents WHERE key='admin_credentials'")
-      .get()!.value as string,
-  );
+  const saved = (await f.storage.get("admin_credentials")) as any;
   assert.equal(saved.mustChange, false);
   assert.ok(await verifyPassword("new-password-12345", saved.passwordHash));
+  f.env.ADMIN_PASSWORD = undefined;
   assert.equal((await f.login()).status, 401);
   assert.equal((await f.login("new-admin", "new-password-12345")).status, 200);
   assert.equal((await f.send("/catalog")).status, 200);
   const id = "00000000-0000-4000-8000-000000000000";
-  f.db
-    .prepare("INSERT INTO sessions VALUES (?,?,?,?)")
-    .run(id, "old-csrf", Date.now() + 60000, "bootstrap");
+  await f.storage.put(`session:${id}`, {
+    id,
+    csrf: "old-csrf",
+    expires: Date.now() + 60000,
+    credential_version: "bootstrap",
+  });
   assert.equal(
     (await f.send("/account", undefined, { Cookie: `kizuna_session=${id}` }))
       .status,
     401,
   );
-  f.db.close();
 });
 test("account password attempts are bounded and cannot reset the attempt limit", async () => {
   const f = await fixture();
@@ -173,7 +141,6 @@ test("account password attempts are bounded and cannot reset the attempt limit",
   for (let i = 0; i < 5; i++)
     assert.equal((await f.send("/account", data)).status, 400);
   assert.equal((await f.send("/account", data)).status, 429);
-  f.db.close();
 });
 test("modular face uploads persist independently and reject missing/oversize assets and whole sheets", async () => {
   const f = await fixture();
@@ -234,5 +201,4 @@ test("modular face uploads persist independently and reject missing/oversize ass
     ).status,
     400,
   );
-  f.db.close();
 });

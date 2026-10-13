@@ -47,7 +47,7 @@ Rilis awal menyediakan **4 fighter anime bawaan + 3 arena bawaan**, serta rancan
 | 11 | AI | Sederhana, adaptif, kepribadian + tuning admin |
 | 12 | Aset karakter | Bawaan + upload aset + Character Creator + Fighter Editor |
 | 13 | Arena | Statis, dinamis, interaktif + Arena Editor |
-| 14 | Infrastruktur | Workers + Durable Objects + D1 + R2; KV opsional |
+| 14 | Infrastruktur | Workers + Durable Objects + KV + R2 |
 | 15 | Login admin | Satu username/password |
 | 16 | Otomasi pertandingan | Manual (admin memegang lifecycle pertandingan) |
 | 17 | Statistik | Analytics Center + leaderboard dan riwayat |
@@ -108,7 +108,7 @@ Admin dapat membuat fighter baru dari aset yang diunggah, bukan terbatas empat k
 
 **Batasan penting:** Upload satu gambar statis **tidak otomatis** menghasilkan seluruh pose/animasi. Untuk dipakai bertarung, admin harus menyediakan frame kompatibel atau memakai rig/template Character Creator yang disediakan. Format aset alternatif di luar PNG/WebP hanya jika diputuskan kemudian. Aset publik perlu lisensi/hak penggunaan; upload dibatasi dan disanitasi.
 
-**Penyimpanan:** File aset R2; metadata dan versi fighter D1. Perubahan fighter versi baru tidak boleh mengubah hasil pertandingan historis. Aset memiliki ID tetap dan versi.
+**Penyimpanan:** File aset R2; metadata dan versi fighter KV. Perubahan fighter versi baru tidak boleh mengubah hasil pertandingan historis. Aset memiliki ID tetap dan versi.
 
 ### 5.3 Character Creator/Fighter Editor
 - Preset karakter bawaan; komposisi bagian karakter kompatibel untuk rambut/wajah/kostum/warna dan aksesori sesuai template.
@@ -235,7 +235,7 @@ Contoh di atas **kontrak internal konseptual**, bukan klaim format payload nyata
 - **Frontend game:** Phaser; rendering dan input browser; kualitas Low/Medium/High dan adaptive resolution.
 - **Workers:** API/admin dan penerima webhook.
 - **Durable Objects:** actor/state otoritatif per room, WebSocket realtime, tick/sinkronisasi dan command queue; perlu menguji kapasitas dan latensi sebelum final desain.
-- **D1:** fighter metadata, arena/config, mapping, members/contributions, score/leaderboard, match history.
+- **KV:** fighter metadata, arena/config, mapping, metadata aset, match history dengan expiration. Akun, sesi dan rate limit memakai key-value storage AuthStore; state realtime, members/contributions dan skor pertandingan aktif tetap pada MatchRoom.
 - **R2:** sprite/spritesheets, background/arena, audio, metadata paket aset.
 - **KV opsional:** cache non-otoritatif; jangan dijadikan sumber kebenaran state match.
 - **GitHub:** source code + deployment workflows.

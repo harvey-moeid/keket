@@ -1,45 +1,58 @@
 # Deployment dan operasi
 
-Konfigurasi terbaru repo memakai **satu Worker Production**, `kizuna-production`, dengan D1 Production yang sudah diikat dalam `wrangler.toml` dan R2 `kizuna-production-assets`. Environment Preview terpisah sudah dihapus pada perubahan upstream. Mode lokal tetap memakai storage lokal Wrangler; sandbox game merupakan room terpisah dan tidak menulis riwayat utama.
+Satu Worker Production, `kizuna-production`, memakai **KV DATA**, **R2 ASSET_BUCKET**, Durable Object **MatchRoom** untuk game realtime, dan Durable Object **AuthStore** untuk autentikasi. Tidak ada binding, database, atau migrasi D1 yang diperlukan aplikasi ini.
 
 ## Resource dan secrets
 
-1. Pastikan akun Cloudflare mendukung SQLite Durable Objects, binding D1 yang tercantum dan bucket R2 Production.
-2. Atur secrets Worker `ADMIN_PASSWORD_HASH` dan `WEBHOOK_SECRET`; untuk konektor native atur `WEBHOOK_SIGNING_SECRET` yang sama pada konektor dan Worker. Nilai secret tidak disimpan di Git atau HTML. Hash admin berformat `310000:<salt hex 16 bytes>:<hash hex 32 bytes>`.
-3. `npm run admin:bootstrap` membuat hash akun awal di `.dev.vars` privat untuk lokal. Konfigurasi Production juga memakai `ADMIN_REQUIRE_PASSWORD_CHANGE="true"`; operator perlu memasukkan hash bootstrap yang sesuai ke secret Worker Production. Kredensial lokal tidak otomatis diunggah ke Cloudflare.
-4. Jalankan migrasi `wrangler d1 migrations apply kizuna-production --remote` sebelum menjalankan Worker baru, atau gunakan workflow CD yang menjalankannya sebelum deploy. Dev lokal memakai `npm run db:local` / `npm run dev`.
-5. Deployment manual memakai `npm run deploy:production`. Ikuti checklist operator [QA.md](QA.md) sebelum menggunakan LIVE nyata.
+1. Akun Cloudflare harus mendukung SQLite-backed Durable Objects dan bucket R2 `kizuna-production-assets`. Nama backend SQLite ini milik Durable Object, bukan D1; autentikasi menggunakan API penyimpanan key-value Durable Object.
+2. Binding KV `DATA` dalam `wrangler.toml` sengaja tidak memiliki ID. Wrangler 4 membuat namespace otomatis saat deploy pertama dan memakai binding yang sama pada deploy berikutnya. Tidak perlu secret KV namespace ID. Untuk namespace yang sudah tersedia, tambahkan `id` ke binding `DATA`.
+3. Pasang secret Worker `ADMIN_PASSWORD` dengan password biasa untuk akun bootstrap dan `WEBHOOK_SECRET` untuk endpoint internal. Untuk konektor TikTok, pasang `WEBHOOK_SIGNING_SECRET` yang sama di konektor dan Worker, minimal 32 karakter. Jangan simpan nilainya di Git atau frontend.
+4. `ADMIN_USERNAME` dan `ADMIN_REQUIRE_PASSWORD_CHANGE="true"` merupakan vars biasa. Opsional `TIKTOK_ROOM_ID` membatasi penerimaan room TikTok.
+5. Jalankan `npm run deploy:production`. Tidak ada langkah migrasi SQL. Migrasi kelas Durable Object `v1` dipertahankan untuk MatchRoom; `v2-auth-kv` menambahkan AuthStore tanpa menghapus state game lama.
+
+`npm run dev` memakai KV, R2, dan Durable Object lokal di `.wrangler/state`. `npm run admin:bootstrap` memasukkan password biasa ke `.dev.vars` privat (ignored Git), bukan mengunggah secret Production. Untuk dua terminal, gunakan `npm run build`, `npm run dev:api`, dan `npm run dev:ui`.
+
+## Penyimpanan KV dan konsistensi
+
+- `document:fighters`, `document:arenas`, `document:settings`, `document:mappings`: konfigurasi JSON.
+- `asset:<id>`: metadata upload; file gambar tetap di R2.
+- `match:<environment>:<reverse-timestamp>:<id>`: hasil pertandingan final. Timestamp tersimpan bersama snapshot MatchRoom sehingga retry menggunakan key yang sama. Sandbox tidak diarsipkan.
+
+Riwayat ditampilkan terbaru dahulu, maksimal 100 hasil, dengan pagination KV. Masa simpan memakai expiration sesuai `retentionDays` pada saat pertandingan selesai; perubahan pengaturan berlaku untuk hasil baru. Tombol Hapus riwayat menghapus seluruh halaman pada prefix environment terkait, tanpa menghapus konfigurasi atau aset.
+
+[KV bersifat eventually consistent](https://developers.cloudflare.com/kv/concepts/how-kv-works/): perubahan konfigurasi, riwayat baru, dan penghapusan riwayat dapat memerlukan 60 detik atau lebih untuk terlihat di lokasi lain. Edit konfigurasi memakai last-write-wins; hindari mengedit dokumen yang sama secara bersamaan. Mapping baru dikirim langsung ke kedua MatchRoom setelah KV berhasil ditulis, sehingga penerapannya tidak menunggu pembacaan KV. Saat room dibangun ulang, konfigurasi dibaca dari KV dan dapat mengikuti jeda propagasi tersebut.
+
+Kredensial admin, sesi, dan batas percobaan login **tidak** mengandalkan cache KV. Semuanya memakai key-value storage AuthStore dengan transaksi. Logout langsung mencabut sesi; rotasi password langsung membatalkan semua versi sesi sebelumnya. Percobaan login serentak tetap dihitung pada satu AuthStore untuk environment tersebut. Alarm membersihkan sesi kedaluwarsa/dicabut dan batas percobaan kedaluwarsa.
 
 ## Akun admin dan pemulihan
 
-Pada environment baru, `ADMIN_USERNAME` dan `ADMIN_PASSWORD_HASH` menjadi kredensial bootstrap. Untuk password awal sementara, atur var Worker `ADMIN_REQUIRE_PASSWORD_CHANGE="true"` di environment tujuan (lokal dibuat oleh `npm run admin:bootstrap`). Hash tetap di secret Worker; tidak ada password default yang disimpan di source. Login pertama membuka form akun sebelum kontrol admin dapat digunakan. Password baru wajib berbeda dan minimal 12 karakter, dengan verifikasi password saat ini serta CSRF dan pembatasan percobaan.
+`ADMIN_USERNAME` dan `ADMIN_PASSWORD` adalah akun bootstrap sebelum akun diganti lewat UI. Dengan `ADMIN_REQUIRE_PASSWORD_CHANGE="true"`, login pertama harus mengganti akun sebelum kontrol admin tersedia. Password baru wajib berbeda, minimal 12 karakter, dan perubahan memerlukan password saat ini, sesi, serta CSRF.
 
-**Settings → Akun admin** mengganti username/password. Kredensial baru disimpan sebagai salted PBKDF2 hash pada dokumen privat D1 `admin_credentials`, mengalahkan konfigurasi bootstrap. Sesi dicabut otomatis; versi kredensial juga menolak sesi dari login lama yang selesai bersamaan dengan rotasi. Hash tidak dikirim ke UI/catalog/overlay. Jalankan migrasi `0002_account_credentials.sql` sebelum menjalankan versi ini; migrasi mengeluarkan sesi versi lama.
+**Settings → Akun admin** menyimpan salted PBKDF2 hash pada key `admin_credentials` milik AuthStore. Password biasa hanya berada di secret bootstrap, tidak disimpan ke KV atau dikirim ke browser. Akun yang tersimpan mengalahkan konfigurasi bootstrap; mengubah `ADMIN_PASSWORD` saja tidak mengganti akun aktif.
 
-Jika kehilangan password, operator dengan akses D1 dapat memulihkan lingkungan yang tepat: siapkan hash bootstrap baru sebagai secret Worker dan `ADMIN_REQUIRE_PASSWORD_CHANGE="true"`, lalu hapus dokumen `admin_credentials` serta semua rows `sessions` pada D1 lingkungan tersebut. Jangan menghapus data fighter/match. Login dengan akun bootstrap baru dan segera ganti melalui UI. Mengubah secret bootstrap saja tidak mengubah akun yang sudah tersimpan di D1. Pemulihan tidak tersedia lewat endpoint publik.
+Pemulihan oleh operator memerlukan akses administratif ke storage AuthStore lingkungan yang benar: siapkan password bootstrap baru dan `ADMIN_REQUIRE_PASSWORD_CHANGE="true"`, lalu hapus key `admin_credentials` dan semua key `session:` di AuthStore. Jangan menghapus storage MatchRoom atau namespace KV DATA. Setelah pemulihan, login menggunakan akun bootstrap dan segera ganti password. Tidak ada endpoint pemulihan publik.
 
 ## GitHub Actions CI/CD
 
-Workflow **Validate** menjalankan install, pemeriksaan format, 44 tes combat/security dan build TypeScript/Vite pada push/PR. **Deploy Cloudflare** menggunakan workflow validasi yang sama sebelum deployment Production pada push `main` atau `workflow_dispatch`. Konfigurasi upstream terbaru tidak memakai release/Preview sebagai pemicu deploy.
+Workflow **Validate** menjalankan install, pemeriksaan format, tes, dan build TypeScript/Vite. **Deploy Cloudflare** menunggu validasi, kemudian deploy Production pada push `main` atau `workflow_dispatch`.
 
-Di GitHub **Settings → Environments → production**, siapkan secrets `CLOUDFLARE_API_TOKEN` dan `CLOUDFLARE_ACCOUNT_ID`. Token perlu scope Worker Scripts, D1 dan R2 pada akun terkait. Atur required reviewers/branch protection bila dibutuhkan dan didukung paket GitHub; kode workflow tidak membuat aturan tersebut otomatis. Secrets aplikasi tetap disimpan di Cloudflare, bukan bundel frontend.
+Di GitHub **Settings → Environments → production**, siapkan:
 
-Workflow memeriksa konfigurasi Production, membangun aplikasi, menjalankan migrasi D1, lalu deploy Worker. Kegagalan validasi/build/migrasi menghentikan deploy. Deployment satu environment diantrikan. Bila deploy gagal setelah migrasi berhasil, perubahan schema tetap ada; gunakan migrasi yang kompatibel dengan Worker sebelumnya. Tidak ada rollback database otomatis. Ringkasan job mencatat SHA commit yang berhasil dideploy.
+- `CLOUDFLARE_API_TOKEN`: izin Edit Workers Scripts, Workers KV Storage, dan Workers R2 Storage pada akun tujuan; Account Settings Read bila dibutuhkan untuk akses akun. D1 tidak lagi diperlukan.
+- `CLOUDFLARE_ACCOUNT_ID`: ID akun tujuan.
 
-Konfigurasi resource berasal dari perubahan upstream; akses credential, hasil runner GitHub dan deployment remote belum diverifikasi dari sesi ini.
+Secret aplikasi tetap dipasang di Cloudflare. Workflow memeriksa binding KV/auth, membangun aplikasi, lalu menjalankan `wrangler deploy` tanpa migrasi D1. Ringkasan job mencatat SHA commit yang berhasil dideploy. Atur required reviewers/branch protection bila diperlukan; workflow tidak membuat aturan tersebut.
 
-## Operasi dan pemulihan
+## Data dari versi D1 sebelumnya
 
-State dan seed AI disimpan dalam tabel SQLite Durable Object setelah kontrol dan tiap 60 tick selama combat. Saat instance direkonstruksi, match yang sebelumnya running diubah menjadi paused; operator melanjutkan secara manual. Ini mencegah asumsi waktu offline sebagai simulasi yang valid. Event dedup tersimpan dalam tabel ber-index setelah ingress dan tetap aktif saat reset; membership dan ringkasan contribution ikut snapshot state. Live socket reconnect mengambil state terbaru.
+Perubahan kode ini tidak menghapus resource D1 remote atau memindahkan data lama secara otomatis. Deploy versi KV pada instalasi yang sebelumnya memakai D1 akan memakai konfigurasi default dan akun bootstrap sampai data diimpor. Sesi lama tidak diterima AuthStore baru.
 
-Perubahan konfigurasi fighter tidak memodifikasi snapshot pertandingan aktif. Nonaktifkan fighter menghapusnya dari pemilihan, bukan hasil historis. ID aset R2 unik; versi metadata meningkat. Tidak ada rollback, backup otomatis, replay, atau auto-rematch.
+Jika D1 lama berisi data penting, ekspor dan migrasikan konfigurasi serta riwayat ke format key KV di atas sebelum mengganti layanan aktif. Akun dapat dibuat ulang melalui bootstrap. Simpan backup dan verifikasi hasil KV sebelum menghapus database lama. Resource remote belum diubah dari workspace ini.
 
-Log in-memory dibatasi 60 entri. Dedup map maksimal 5000 IDs / 60 detik; room ingress maksimal 100 event/detik, anggota maksimal 5000, per-team queue maksimal 100. Batas ini merupakan budget konfigurasi MVP, **bukan** hasil stress test LIVE ribuan penonton. D1 archive terbaru dibatasi 100 match pada layar/export. Retensi D1 berjalan ketika hasil baru diarsipkan; bukan scheduled purge. Tombol Hapus riwayat menghapus history environment, bukan state membership match aktif atau aset R2.
+## Operasi
 
-## Peringatan yang perlu diuji pada infrastruktur nyata
+MatchRoom tetap menyimpan snapshot game, seed AI, membership, contributions, serta dedup event dalam storage Durable Object. Setelah instance dibangun ulang, pertandingan running menjadi paused dan harus dilanjutkan operator. Lifecycle tetap manual. Perubahan fighter tidak mengubah snapshot pertandingan aktif.
 
-DO menggunakan fixed-step interval saat match running (30 tick/s), broadcast 10 Hz. Belum ada kapasitas/latensi production terukur atau scheduler catch-up untuk tick yang tertunda. Setiap room adalah satu sumber kebenaran; visual browser tidak menentukan damage. Visual FPS yang ditampilkan adalah pengukuran browser, bukan jaminan 60 FPS.
+Gunakan HTTPS. Cookie sesi HttpOnly/SameSite Strict/Secure pada HTTPS, berlaku 24 jam. Login dibatasi 5 percobaan per IP selama 15 menit. Mutasi admin memerlukan sesi dan CSRF. Webhook internal memakai Bearer token; webhook TikTok memakai HMAC-SHA256, freshness dan dedup/rate limit.
 
-Gunakan HTTPS. Cookies sesi HttpOnly/SameSite Strict, Secure pada HTTPS, expiry 24 jam. Login dibatasi 5 percobaan per IP / 15 menit. Mutasi admin memerlukan sesi dan CSRF token; kontrol realtime tetap melalui REST admin. WebSocket publik hanya mengirim state, tanpa menerima kontrol. Webhook internal memakai Bearer token; endpoint native `/api/game/tiktok` memverifikasi HMAC-SHA256 konektor sebelum parsing, dengan freshness 30 detik + dedup/rate caps. Atur `WEBHOOK_SIGNING_SECRET` yang sama pada konektor dan Worker, serta opsional `TIKTOK_ROOM_ID`; lihat [panduan integrasi](TIKTOK.md). Konektor menyediakan event ID stabil pada retry, tetapi hanya username viewer (bukan numeric user ID); batas identitas didokumentasikan. Hadiah streak hanya diterapkan pada event final.
-
-Periksa checklist QA sebelum LIVE; dukungan gamepad, low-latency multiplayer eksternal, penyimpanan ban viewer dan koneksi provider LIVE nyata belum diverifikasi.
+DO berjalan pada tick simulasi 30 Hz dan broadcast 10 Hz. Kapasitas/latensi LIVE produksi belum diukur. Ikuti [checklist QA](QA.md) dan [panduan TikTok](TIKTOK.md) sebelum LIVE. Tidak ada backup otomatis atau rollback storage aplikasi.

@@ -29,10 +29,9 @@ jobs:
       - run: npm ci
       - run: node scripts/prepare-deploy.mjs
       - run: npm run build
-      - name: Migrate D1 and deploy production Worker
+      - name: Deploy production Worker
         run: |
           set -euo pipefail
-          npx wrangler d1 migrations apply kizuna-production --remote
           npx wrangler deploy
       - name: Record deployed commit
         run: |

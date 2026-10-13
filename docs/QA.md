@@ -1,3 +1,5 @@
+> Catatan migrasi KV: aplikasi sekarang tidak memakai D1. Catatan D1/SQLite di bawah adalah hasil QA versi sebelumnya. Versi KV lulus 55 tes, build TypeScript/Vite, pemeriksaan format, dan dry run deploy. Tes mencakup pagination/retensi riwayat, retry arsip setelah restart, logout, rotasi password dan rate limit serentak. Smoke test workerd lokal dengan KV/AuthStore/MatchRoom nyata lulus untuk login/rotasi, konfigurasi, mapping, analytics, clear dan logout. Deployment remote belum dijalankan.
+
 # QA — 10 Oktober 2026
 
 Validasi ini dilakukan pada environment cloud Linux, Node 24.19, Vite 7.3.7, Wrangler 4.149, Chromium headless yang tersedia di mesin. Pengujian browser otomatis dan inspeksi visual screenshot **tidak menggantikan** sign-off manual operator sebelum production.

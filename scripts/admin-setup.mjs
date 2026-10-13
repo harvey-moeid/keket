@@ -5,7 +5,7 @@ const rl = createInterface({ input: process.stdin, output: process.stdout });
 const initial = process.argv.includes("--initial");
 const minimum = initial ? 8 : 12;
 console.log(
-  "Konfigurasi akun pengembangan lokal. Password tidak disimpan plaintext.",
+  "Konfigurasi akun pengembangan lokal. Password disimpan sebagai secret lokal di .dev.vars (ignored).",
 );
 const username = (await rl.question("Username [admin]: ")) || "admin";
 if (!/^[A-Za-z0-9_.-]{3,32}$/.test(username)) {
@@ -49,19 +49,6 @@ const password = await new Promise((resolve) => {
 });
 if (password.length < minimum || password.length > 256)
   throw Error(`Password ${minimum}–256 karakter.`);
-const salt = webcrypto.getRandomValues(new Uint8Array(16));
-const key = await webcrypto.subtle.importKey(
-  "raw",
-  new TextEncoder().encode(password),
-  "PBKDF2",
-  false,
-  ["deriveBits"],
-);
-const hash = await webcrypto.subtle.deriveBits(
-  { name: "PBKDF2", hash: "SHA-256", salt, iterations: 310000 },
-  key,
-  256,
-);
 const hex = (b) => Buffer.from(b).toString("hex");
 let old = "";
 try {
@@ -71,8 +58,9 @@ const retained = old
   .split("\n")
   .filter(
     (line) =>
-      !/^ADMIN_(USERNAME|PASSWORD_HASH|REQUIRE_PASSWORD_CHANGE)=/.test(line) &&
-      line.trim(),
+      !/^ADMIN_(USERNAME|PASSWORD|PASSWORD_HASH|REQUIRE_PASSWORD_CHANGE)=/.test(
+        line,
+      ) && line.trim(),
   )
   .join("\n");
 const secret = retained.includes("WEBHOOK_SECRET=")
@@ -82,10 +70,10 @@ const secret = retained.includes("WEBHOOK_SECRET=")
     "\n";
 await writeFile(
   ".dev.vars",
-  `ADMIN_USERNAME=${JSON.stringify(username)}\nADMIN_PASSWORD_HASH=${JSON.stringify("310000:" + hex(salt) + ":" + hex(hash))}\nADMIN_REQUIRE_PASSWORD_CHANGE=${JSON.stringify(initial ? "true" : "false")}\n${secret}${retained}\n`,
+  `ADMIN_USERNAME=${JSON.stringify(username)}\nADMIN_PASSWORD=${JSON.stringify(password)}\nADMIN_REQUIRE_PASSWORD_CHANGE=${JSON.stringify(initial ? "true" : "false")}\n${secret}${retained}\n`,
   { mode: 0o600 },
 );
 await chmod(".dev.vars", 0o600);
 console.log(
-  "Akun bootstrap tersimpan di .dev.vars (ignored). Restart npm run dev:api. Akun yang sudah diganti melalui UI memakai data D1; lihat panduan pemulihan akun. Secret webhook lokal dibuat bila belum ada.",
+  "Akun bootstrap tersimpan di .dev.vars (ignored). Restart npm run dev:api. Akun yang sudah diganti melalui UI memakai data Durable Object autentikasi; lihat panduan pemulihan akun. Secret webhook lokal dibuat bila belum ada.",
 );

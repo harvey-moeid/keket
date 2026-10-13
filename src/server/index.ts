@@ -1,3 +1,16 @@
+import {
+  readDoc,
+  saveDoc,
+  archiveMatch,
+  listMatches,
+  clearMatches,
+} from "./storage";
+import {
+  authRequest,
+  type AdminCredentials,
+  type AuthSnapshot,
+} from "./auth-store";
+export { AuthStore } from "./auth-store";
 import { Engine } from "../shared/engine";
 import { adaptTikTokEvent, verifyTikTokSignature } from "./tiktok";
 import {
@@ -26,11 +39,12 @@ import {
 } from "./security";
 export interface Env {
   ROOMS: DurableObjectNamespace;
-  DB: D1Database;
+  DATA: KVNamespace;
+  AUTH: DurableObjectNamespace;
   ASSET_BUCKET: R2Bucket;
   ASSETS: Fetcher;
   ADMIN_USERNAME: string;
-  ADMIN_PASSWORD_HASH: string;
+  ADMIN_PASSWORD?: string;
   ADMIN_REQUIRE_PASSWORD_CHANGE?: string;
   WEBHOOK_SECRET: string;
   WEBHOOK_SIGNING_SECRET?: string;
@@ -45,27 +59,8 @@ const json = (value: unknown, status = 200) =>
       "X-Content-Type-Options": "nosniff",
     },
   });
-interface AdminCredentials {
-  username: string;
-  passwordHash: string;
-  mustChange: boolean;
-  version: string;
-}
 async function body(req: Request) {
   return JSON.parse(new TextDecoder().decode(await readLimited(req, 65536)));
-}
-async function readDoc<T>(env: Env, key: string, fallback: T): Promise<T> {
-  const r = await env.DB.prepare("SELECT value FROM documents WHERE key=?")
-    .bind(key)
-    .first<{ value: string }>();
-  return r ? JSON.parse(r.value) : structuredClone(fallback);
-}
-async function saveDoc(env: Env, key: string, value: unknown) {
-  await env.DB.prepare(
-    "INSERT INTO documents (key,value,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at",
-  )
-    .bind(key, JSON.stringify(value), new Date().toISOString())
-    .run();
 }
 function publicState(s: MatchState) {
   return {
@@ -85,6 +80,8 @@ export class MatchRoom {
   clients = new Set<WebSocket>();
   persistTick = 0;
   archived = new Set<string>();
+  archivePending = new Map<string, Promise<void>>();
+  archiveStamp?: { id: string; endedAt: number };
   burst = { at: 0, count: 0 };
   constructor(
     private ctx: DurableObjectState,
@@ -111,6 +108,7 @@ export class MatchRoom {
       if (row) {
         const saved = JSON.parse(row.value);
         this.engine.state = saved.state;
+        this.archiveStamp = saved.archiveStamp;
         this.engine.seed = saved.seed ?? 73421;
         this.engine.lastAI = saved.lastAI || { red: 0, blue: 0 };
       } else {
@@ -169,15 +167,19 @@ export class MatchRoom {
     }, 1000 / 30);
   }
   async persist() {
-    // Capture before awaiting D1 so a fast reset cannot replace the finished result.
+    // Capture before awaiting KV so a fast reset cannot replace the finished result.
     const s = structuredClone(this.engine.state);
     this.persistTick = s.tick;
+    if (s.status === "finished" && this.archiveStamp?.id !== s.id)
+      this.archiveStamp = { id: s.id, endedAt: Date.now() };
+    const endedAt = this.archiveStamp?.endedAt;
     this.ctx.storage.sql.exec(
       "INSERT INTO room_snapshot VALUES ('state',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
       JSON.stringify({
         state: s,
         seed: this.engine.seed,
         lastAI: this.engine.lastAI,
+        archiveStamp: this.archiveStamp,
       }),
     );
     if (
@@ -185,27 +187,24 @@ export class MatchRoom {
       !this.archived.has(s.id) &&
       s.environment !== "sandbox"
     ) {
-      await this.env.DB.prepare(
-        "INSERT OR IGNORE INTO matches (id,environment,result,ended_at) VALUES (?,?,?,?)",
-      )
-        .bind(
-          s.id,
-          s.environment,
-          JSON.stringify({ ...s, logs: [], queues: { red: [], blue: [] } }),
-          new Date().toISOString(),
-        )
-        .run();
-      this.archived.add(s.id);
-      if (this.archived.size > 1000)
-        this.archived.delete(this.archived.values().next().value!);
-      await this.env.DB.prepare("DELETE FROM matches WHERE ended_at < ?")
-        .bind(
-          new Date(
-            Date.now() - s.settings.retentionDays * 86400000,
-          ).toISOString(),
-        )
-        .run();
+      let pending = this.archivePending.get(s.id);
+      if (!pending) {
+        pending = this.archiveResult(s, endedAt!);
+        this.archivePending.set(s.id, pending);
+      }
+      try {
+        await pending;
+      } finally {
+        if (this.archivePending.get(s.id) === pending)
+          this.archivePending.delete(s.id);
+      }
     }
+  }
+  private async archiveResult(s: MatchState, endedAt: number) {
+    await archiveMatch(this.env.DATA, s, endedAt);
+    this.archived.add(s.id);
+    if (this.archived.size > 1000)
+      this.archived.delete(this.archived.values().next().value!);
   }
   async fetch(req: Request) {
     const url = new URL(req.url);
@@ -379,25 +378,27 @@ export default {
       const needsCredentials =
         !!req.headers.get("Cookie")?.includes("kizuna_session=") ||
         ["/api/auth", "/api/login", "/api/account"].includes(p);
-      const storedCredentials = needsCredentials
-        ? await readDoc<AdminCredentials | null>(env, "admin_credentials", null)
-        : null;
-      const credentials = storedCredentials || {
-        username: env.ADMIN_USERNAME,
-        passwordHash: env.ADMIN_PASSWORD_HASH,
-        mustChange: env.ADMIN_REQUIRE_PASSWORD_CHANGE === "true",
-        version: "bootstrap",
-      };
       const cookie = req.headers
         .get("Cookie")
         ?.match(/(?:^|;\s*)kizuna_session=([a-f0-9-]+)/)?.[1];
-      const session = cookie
-        ? await env.DB.prepare(
-            "SELECT id,csrf,expires FROM sessions WHERE id=? AND expires>? AND credential_version=?",
-          )
-            .bind(cookie, Date.now(), credentials.version)
-            .first<{ id: string; csrf: string; expires: number }>()
-        : null;
+      const snapshot = needsCredentials
+        ? await authRequest<AuthSnapshot>(env, { action: "snapshot", cookie })
+        : { credentials: null, session: null };
+      const storedCredentials = snapshot.credentials;
+      const credentials = storedCredentials || {
+        username: env.ADMIN_USERNAME,
+        passwordHash: "",
+        mustChange: env.ADMIN_REQUIRE_PASSWORD_CHANGE === "true",
+        version: "bootstrap",
+      };
+      const configured = !!(
+        storedCredentials?.passwordHash || env.ADMIN_PASSWORD
+      );
+      const checkPassword = (password: string) =>
+        storedCredentials
+          ? verifyPassword(password, storedCredentials.passwordHash)
+          : constantEqual(password, env.ADMIN_PASSWORD || "");
+      const session = snapshot.session;
       const sameOrigin =
         !req.headers.get("Origin") || req.headers.get("Origin") === u.origin;
       if (p === "/api/auth" && req.method === "GET")
@@ -405,53 +406,41 @@ export default {
           authenticated: !!session,
           csrf: session?.csrf,
           environment: env.APP_ENV,
-          configured: !!credentials.passwordHash,
+          configured,
           mustChangePassword: !!session && credentials.mustChange,
         });
       if (p === "/api/login" && req.method === "POST") {
         if (!sameOrigin) return json({ error: "Origin ditolak." }, 403);
-        if (!credentials.passwordHash)
-          return json(
-            { error: "ADMIN_PASSWORD_HASH belum dikonfigurasi." },
-            503,
-          );
+        if (!configured)
+          return json({ error: "ADMIN_PASSWORD belum dikonfigurasi." }, 503);
         const ip = req.headers.get("CF-Connecting-IP") || "local";
-        let limit = await env.DB.prepare(
-          "SELECT attempts,resets FROM login_limits WHERE ip=?",
-        )
-          .bind(ip)
-          .first<{ attempts: number; resets: number }>();
-        if (limit && limit.resets > Date.now() && limit.attempts >= 5)
+        if (!(await authRequest<boolean>(env, { action: "attempt", ip })))
           return json(
             { error: "Terlalu banyak percobaan. Coba dalam 15 menit." },
             429,
           );
         const d = await body(req);
-        await env.DB.prepare(
-          "INSERT INTO login_limits (ip,attempts,resets) VALUES (?,1,?) ON CONFLICT(ip) DO UPDATE SET attempts=CASE WHEN resets<? THEN 1 ELSE attempts+1 END,resets=CASE WHEN resets<? THEN excluded.resets ELSE resets END",
-        )
-          .bind(ip, Date.now() + 900000, Date.now(), Date.now())
-          .run();
         if (
           d.username !== credentials.username ||
           typeof d.password !== "string" ||
           d.password.length > 256 ||
-          !(await verifyPassword(d.password, credentials.passwordHash))
+          !(await checkPassword(d.password))
         )
           return json({ error: "Username atau password salah." }, 401);
         const id = crypto.randomUUID(),
           csrf = crypto.randomUUID();
-        await env.DB.prepare("DELETE FROM sessions WHERE expires<?")
-          .bind(Date.now())
-          .run();
-        await env.DB.prepare(
-          "INSERT INTO sessions (id,csrf,expires,credential_version) VALUES (?,?,?,?)",
-        )
-          .bind(id, csrf, Date.now() + 86400000, credentials.version)
-          .run();
-        await env.DB.prepare("DELETE FROM login_limits WHERE ip=?")
-          .bind(ip)
-          .run();
+        const created = await authRequest<boolean>(env, {
+          action: "login",
+          ip,
+          session: {
+            id,
+            csrf,
+            expires: Date.now() + 86400000,
+            credential_version: credentials.version,
+          },
+        });
+        if (!created)
+          return json({ error: "Akun telah berubah. Login kembali." }, 409);
         return Response.json(
           { csrf, mustChangePassword: credentials.mustChange },
           {
@@ -561,9 +550,7 @@ export default {
       )
         return json({ error: "Validasi CSRF gagal." }, 403);
       if (p === "/api/logout" && req.method === "POST") {
-        await env.DB.prepare("DELETE FROM sessions WHERE id=?")
-          .bind(session.id)
-          .run();
+        await authRequest(env, { action: "logout", id: session.id });
         return Response.json(
           { ok: true },
           {
@@ -597,25 +584,15 @@ export default {
             400,
           );
         const ip = req.headers.get("CF-Connecting-IP") || "local";
-        const limit = await env.DB.prepare(
-          "SELECT attempts,resets FROM login_limits WHERE ip=?",
-        )
-          .bind(ip)
-          .first<{ attempts: number; resets: number }>();
-        if (limit && limit.resets > Date.now() && limit.attempts >= 5)
+        if (!(await authRequest<boolean>(env, { action: "attempt", ip })))
           return json(
             { error: "Terlalu banyak percobaan. Coba dalam 15 menit." },
             429,
           );
-        await env.DB.prepare(
-          "INSERT INTO login_limits (ip,attempts,resets) VALUES (?,1,?) ON CONFLICT(ip) DO UPDATE SET attempts=CASE WHEN resets<? THEN 1 ELSE attempts+1 END,resets=CASE WHEN resets<? THEN excluded.resets ELSE resets END",
-        )
-          .bind(ip, Date.now() + 900000, Date.now(), Date.now())
-          .run();
         if (
           typeof d.currentPassword !== "string" ||
           d.currentPassword.length > 256 ||
-          !(await verifyPassword(d.currentPassword, credentials.passwordHash))
+          !(await checkPassword(d.currentPassword))
         )
           return json({ error: "Password saat ini salah." }, 400);
         const next: AdminCredentials = {
@@ -624,23 +601,14 @@ export default {
           mustChange: false,
           version: crypto.randomUUID(),
         };
-        const results = await env.DB.batch([
-          env.DB.prepare(
-            "INSERT INTO documents (key,value,updated_at) VALUES ('admin_credentials',?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at WHERE documents.value=?",
-          ).bind(
-            JSON.stringify(next),
-            new Date().toISOString(),
-            storedCredentials ? JSON.stringify(storedCredentials) : "",
-          ),
-          env.DB.prepare(
-            "DELETE FROM sessions WHERE credential_version!=? AND EXISTS (SELECT 1 FROM documents WHERE key='admin_credentials' AND json_extract(value,'$.version')=?)",
-          ).bind(next.version, next.version),
-        ]);
-        if (!results[0].meta.changes)
+        const rotated = await authRequest<boolean>(env, {
+          action: "rotate",
+          expectedVersion: credentials.version,
+          next,
+          ip,
+        });
+        if (!rotated)
           return json({ error: "Akun telah berubah. Login kembali." }, 409);
-        await env.DB.prepare("DELETE FROM login_limits WHERE ip=?")
-          .bind(ip)
-          .run();
         return Response.json(
           { ok: true, reauthenticate: true },
           {
@@ -705,7 +673,7 @@ export default {
             new Request("https://room/mappings", {
               method: "POST",
               headers: { "X-Internal-Admin": "yes" },
-              body: "{}",
+              body: JSON.stringify(d),
             }),
           );
         return json({ ok: true });
@@ -838,34 +806,23 @@ export default {
         await env.ASSET_BUCKET.put(id, data, {
           httpMetadata: { contentType: file.type },
         });
-        await env.DB.prepare("INSERT INTO assets VALUES (?,?,?,?,?)")
-          .bind(
+        await env.DATA.put(
+          `asset:${id}`,
+          JSON.stringify({
             id,
-            file.name.slice(0, 100),
-            file.type,
-            file.size,
-            new Date().toISOString(),
-          )
-          .run();
+            name: file.name.slice(0, 100),
+            mime: file.type,
+            bytes: file.size,
+            created_at: new Date().toISOString(),
+          }),
+        );
         return json({ asset: `/api/assets/${id}`, ...size });
       }
       if (p === "/api/analytics" && req.method === "GET") {
-        const rows = await env.DB.prepare(
-          "SELECT id,ended_at,result FROM matches WHERE environment=? ORDER BY ended_at DESC LIMIT 100",
-        )
-          .bind(env.APP_ENV)
-          .all<{ id: string; ended_at: string; result: string }>();
-        return json({
-          matches: rows.results.map((r) => ({
-            ...r,
-            result: JSON.parse(r.result),
-          })),
-        });
+        return json({ matches: await listMatches(env.DATA, env.APP_ENV) });
       }
       if (p === "/api/privacy/clear" && req.method === "POST") {
-        await env.DB.prepare("DELETE FROM matches WHERE environment=?")
-          .bind(env.APP_ENV)
-          .run();
+        await clearMatches(env.DATA, env.APP_ENV);
         return json({ ok: true });
       }
       return json({ error: "Endpoint tidak ditemukan." }, 404);

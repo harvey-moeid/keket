@@ -2,7 +2,7 @@
 
 Game fighting 2D anime dan control room untuk satu TikTok LIVE, dua tim. Dibangun berdasarkan [PRD](docs/PRD.md), dengan rilis bertahap dan status implementasi yang eksplisit di [matriks fitur](docs/IMPLEMENTATION.md).
 
-**Stack:** TypeScript, Phaser 3, Vite, Cloudflare Workers, Durable Objects, D1, R2. Empat fighter dan tiga arena orisinal procedural; font dan aset UI disajikan lokal.
+**Stack:** TypeScript, Phaser 3, Vite, Cloudflare Workers, Durable Objects, KV, R2. Empat fighter dan tiga arena orisinal procedural; font dan aset UI disajikan lokal.
 
 ## Menjalankan lokal
 
@@ -14,11 +14,11 @@ npm run admin:setup
 npm run dev
 ```
 
-`admin:setup` meminta username dan password dengan input password tersembunyi. Password harus minimal 12 karakter; hanya PBKDF2 salted hash disimpan. `.dev.vars` diabaikan Git dan tidak boleh dikomit. Secret webhook lokal dibuat bila belum ada, tanpa dicetak. Akun bootstrap baru dibaca setelah Worker direstart, selama akun belum diganti lewat UI.
+`admin:setup` meminta username dan password dengan input password tersembunyi. Password harus minimal 12 karakter; password bootstrap disimpan sebagai `ADMIN_PASSWORD` di file privat `.dev.vars`. `.dev.vars` diabaikan Git dan tidak boleh dikomit. Secret webhook lokal dibuat bila belum ada, tanpa dicetak. Akun bootstrap baru dibaca setelah Worker direstart, selama akun belum diganti lewat UI.
 
-Untuk akun awal sementara, gunakan `npm run admin:bootstrap`: password awal minimal 8 karakter dan wajib diganti setelah login pertama. Di UI **Settings → Akun admin**, password baru minimal 12 karakter. Perubahan disimpan sebagai hash di D1 dan mengeluarkan semua sesi lama. Setelah akun diganti lewat UI, data D1 menjadi sumber kredensial utama; mengubah `.dev.vars` saja tidak mengganti akun aktif. Lihat [panduan pemulihan akun](docs/DEPLOYMENT.md#akun-admin-dan-pemulihan).
+Untuk akun awal sementara, gunakan `npm run admin:bootstrap`: password awal minimal 8 karakter dan wajib diganti setelah login pertama. Di UI **Settings → Akun admin**, password baru minimal 12 karakter. Perubahan disimpan sebagai hash di Durable Object autentikasi dan mengeluarkan semua sesi lama. Setelah akun diganti lewat UI, data Durable Object autentikasi menjadi sumber kredensial utama; mengubah `.dev.vars` saja tidak mengganti akun aktif. Lihat [panduan pemulihan akun](docs/DEPLOYMENT.md#akun-admin-dan-pemulihan).
 
-`dev` menyiapkan build awal bila belum ada, menjalankan migrasi D1 lokal secara idempoten, lalu menjalankan Vite port 5173 dan Worker port 8787. Untuk dua terminal terpisah: `npm run db:local`, `npm run build`, `npm run dev:api`, dan `npm run dev:ui`. Database/aset lokal berada di `.wrangler/state` dan tidak dicampur dengan resource remote.
+`dev` menyiapkan build awal bila belum ada, menjalankan Vite port 5173 dan Worker port 8787. Untuk dua terminal terpisah: `npm run build`, `npm run dev:api`, dan `npm run dev:ui`. Database/aset lokal berada di `.wrangler/state` dan tidak dicampur dengan resource remote.
 
 ## Alur operator
 
@@ -75,4 +75,4 @@ npm run build
 
 GitHub Actions menjalankan CI pada push/PR. Konfigurasi CD terbaru menargetkan Production pada push `main` atau pemicu manual. Ikuti [setup secrets dan environment CI/CD](docs/DEPLOYMENT.md#github-actions-cicd).
 
-Lihat [hasil QA dan checklist operator](docs/QA.md), [deployment](docs/DEPLOYMENT.md), serta [batas implementasi](docs/IMPLEMENTATION.md). Deployment LIVE belum dijalankan. Binding Production sudah tercantum di `wrangler.toml`; storage lokal tetap terpisah. Hash akun lokal perlu dikonfigurasi sebagai secret Worker agar kredensial awal yang sama berlaku di Cloudflare.
+Lihat [hasil QA dan checklist operator](docs/QA.md), [deployment](docs/DEPLOYMENT.md), serta [batas implementasi](docs/IMPLEMENTATION.md). Deployment LIVE belum dijalankan. Binding Production sudah tercantum di `wrangler.toml`; storage lokal tetap terpisah. Password akun lokal perlu dikonfigurasi sebagai secret Worker agar kredensial awal yang sama berlaku di Cloudflare.
