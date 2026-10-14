@@ -103,6 +103,12 @@ small {
   flex-direction: column;
   padding: 30px 16px 16px;
   z-index: 20;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-width: thin;
+}
+.sidebar > * {
+  flex-shrink: 0;
 }
 .brand {
   display: flex;
@@ -2100,15 +2106,15 @@ td code {
     width: 100%;
     inset: auto;
     padding: 14px 16px;
-    flex-direction: row;
-    align-items: center;
+    gap: 12px;
     border-right: 0;
     border-bottom: 1px solid #302837;
+    overflow: visible;
   }
   .brand {
     padding: 0;
     font-size: 18px;
-    margin-right: auto;
+    align-self: flex-start;
   }
   .brand-mark {
     width: 30px;
@@ -2120,30 +2126,44 @@ td code {
     letter-spacing: 1px;
   }
   .sidebar .workspace-label,
-  .sidebar-bottom,
   .live-note {
     display: none;
   }
   .sidebar nav {
     display: flex;
-    gap: 1px;
+    flex-wrap: wrap;
+    gap: 4px;
   }
-  .nav-link {
-    padding: 8px;
-    gap: 0;
+  .sidebar .nav-link {
+    min-height: 44px;
+    padding: 10px;
+    gap: 8px;
     border-radius: 5px;
     margin: 0;
   }
-  .nav-link span {
-    display: none;
-  }
-  .nav-link svg {
+  .sidebar .nav-link svg {
     width: 16px;
     height: 16px;
   }
-  .sidebar nav .nav-link:nth-child(2),
-  .sidebar nav .nav-link:nth-child(4) {
+  .sidebar .mini-dot {
     display: none;
+  }
+  .sidebar-bottom {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 0;
+    padding-top: 8px;
+    border-top: 1px solid var(--border);
+  }
+  .sidebar .account {
+    width: auto;
+    min-height: 44px;
+    margin-top: 0;
+    padding: 6px;
+    border-top: 0;
   }
   .shell {
     display: block;
